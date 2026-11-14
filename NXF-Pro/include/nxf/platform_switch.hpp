@@ -18,6 +18,9 @@ std::unique_ptr<StorageApi> openInternalStorage();
 /// Real FTP server bound to the console's network interface.
 std::unique_ptr<FtpController> createFtpServer(StorageApi& sd, StorageApi& internal);
 
+/// Installed applications, listed and removed through the console's ns service.
+std::unique_ptr<TitleApi> createTitleApi();
+
 /// Settings persistence (sdmc:/switch/NXF Pro/config.ini).
 bool loadSettings(const std::string& path, SettingsState& out);
 bool saveSettings(const std::string& path, const SettingsState& settings);

@@ -42,6 +42,7 @@ enum class Icon {
     Warning,
     Power,
     Link,
+    Apps,
 };
 
 /// Maps a file name to the icon that represents it.

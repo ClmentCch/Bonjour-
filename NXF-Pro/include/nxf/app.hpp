@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -17,7 +18,7 @@
 
 namespace nxf {
 
-enum class Section { Sd = 0, Internal = 1, Ftp = 2, Settings = 3, About = 4 };
+enum class Section { Sd = 0, Internal = 1, Apps = 2, Ftp = 3, Settings = 4, About = 5 };
 enum class ViewMode { List, Grid };
 enum class DialogKind { None, Confirm, Properties, Actions };
 
@@ -92,6 +93,44 @@ struct FtpController {
     virtual FtpSnapshot snapshot() const = 0;
 };
 
+/// One installed application (game, homebrew or system title), as reported by
+/// the console's ns service.
+struct TitleEntry {
+    std::uint64_t id = 0;
+    std::string name;
+    std::string author;
+    std::string version;
+    int updates = 0;
+    int dlc = 0;
+    std::vector<std::uint8_t> iconJpeg;
+};
+
+struct TitleRemovalReport {
+    bool contentRemoved = false;
+    int savesRemoved = 0;
+    int leftoversRemoved = 0;
+};
+
+/// Installed application management (list + complete removal).
+struct TitleApi {
+    virtual ~TitleApi() = default;
+    virtual bool available() const = 0;
+    virtual bool list(std::vector<TitleEntry>& out, std::string& error) = 0;
+    /// Removes the title, its updates, its DLC, its save data and the leftover
+    /// Atmosphère content folders.
+    virtual bool remove(std::uint64_t id, TitleRemovalReport& report, std::string& error) = 0;
+};
+
+struct AppsState {
+    std::vector<TitleEntry> entries;
+    std::map<std::uint64_t, Image> icons;
+    int cursor = 0;
+    float scroll = 0.0f;
+    float scrollTarget = 0.0f;
+    bool loaded = false;
+    std::string error;
+};
+
 struct ExplorerState {
     std::string path;
     std::vector<FileEntry> entries;
@@ -148,7 +187,7 @@ constexpr float kVisibleListHeight = kContentBottom - kContentTop;
 /// Sidebar geometry shared by input handling and rendering.
 namespace nav {
 
-constexpr int kCount = 5;
+constexpr int kCount = 6;
 
 inline float itemY(int index) {
     switch (index) {
@@ -156,7 +195,8 @@ inline float itemY(int index) {
         case 1: return 218.0f;
         case 2: return 304.0f;
         case 3: return 390.0f;
-        case 4: return 442.0f;
+        case 4: return 476.0f;
+        case 5: return 528.0f;
         default: return 166.0f;
     }
 }
@@ -165,9 +205,10 @@ inline int indexForSection(Section section) {
     switch (section) {
         case Section::Sd: return 0;
         case Section::Internal: return 1;
-        case Section::Ftp: return 2;
-        case Section::Settings: return 3;
-        case Section::About: return 4;
+        case Section::Apps: return 2;
+        case Section::Ftp: return 3;
+        case Section::Settings: return 4;
+        case Section::About: return 5;
     }
     return 0;
 }
@@ -176,9 +217,10 @@ inline Section sectionFor(int index) {
     switch (index) {
         case 0: return Section::Sd;
         case 1: return Section::Internal;
-        case 2: return Section::Ftp;
-        case 3: return Section::Settings;
-        case 4: return Section::About;
+        case 2: return Section::Apps;
+        case 3: return Section::Ftp;
+        case 4: return Section::Settings;
+        case 5: return Section::About;
         default: return Section::Sd;
     }
 }
@@ -201,7 +243,7 @@ inline int hitTest(float x, float y) {
 class App {
 public:
     App(FontSet& fonts, Platform& platform, FtpController& ftp, StorageApi& sd,
-        StorageApi& internal);
+        StorageApi& internal, TitleApi& titles);
 
     void setLogo(const Image* logo) { logo_ = logo; }
 
@@ -262,14 +304,20 @@ private:
     void updateSectionNav(const InputState& input);
     void updateFtpScreen(const InputState& input);
     void updateSettingsScreen(const InputState& input);
+    void updateApps(const InputState& input);
     void updateTouch(const InputState& input);
     void handleShortcuts(const InputState& input);
+
+    void refreshTitles();
+    void requestTitleDelete();
+    const Image* titleIcon(const TitleEntry& entry);
 
     // Rendering (render.cpp)
     void renderSidebar(Canvas& canvas);
     void renderHeader(Canvas& canvas);
     void renderExplorer(Canvas& canvas, ExplorerState& view, StorageApi& api);
     void renderFtp(Canvas& canvas);
+    void renderApps(Canvas& canvas);
     void renderSettings(Canvas& canvas);
     void renderAbout(Canvas& canvas);
     void renderFooter(Canvas& canvas);
@@ -281,6 +329,7 @@ private:
     FtpController& ftp_;
     StorageApi& sd_;
     StorageApi& internal_;
+    TitleApi& titleApi_;
     const Image* logo_ = nullptr;
 
     Section section_ = Section::Sd;
@@ -309,12 +358,15 @@ private:
     std::string dialogPath_;          // item the dialog acts on
     std::function<void(const std::string&)> dialogApply_;
     int pendingAction_ = -1;
+    std::uint64_t pendingTitleId_ = 0;
 
     std::vector<std::string> clipboard_;
     bool clipboardCut_ = false;
 
     std::string toast_;
     float toastTimer_ = 0.0f;
+
+    AppsState apps_;
 
     int settingsCursor_ = 0;
     int ftpFocus_ = 0;

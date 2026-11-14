@@ -107,6 +107,7 @@ Icon sectionIcon(Section section) {
         case Section::Sd: return Icon::SdCard;
         case Section::Internal: return Icon::Memory;
         case Section::Ftp: return Icon::Network;
+        case Section::Apps: return Icon::Apps;
         case Section::Settings: return Icon::Settings;
         case Section::About: return Icon::Info;
     }
@@ -117,6 +118,7 @@ const char* sectionLabel(Section section) {
     switch (section) {
         case Section::Sd: return "Carte SD";
         case Section::Internal: return "Mémoire interne";
+        case Section::Apps: return "Applications";
         case Section::Ftp: return "Serveur FTP";
         case Section::Settings: return "Paramètres";
         case Section::About: return "À propos";
@@ -133,6 +135,7 @@ struct NavEntry {
 const NavEntry kNav[] = {
     {"Switch SD", Icon::SdCard, Section::Sd},
     {"Mémoire interne", Icon::Memory, Section::Internal},
+    {"Applications", Icon::Apps, Section::Apps},
     {"FTP", Icon::Network, Section::Ftp},
     {"Paramètres", Icon::Settings, Section::Settings},
     {"À propos", Icon::Info, Section::About},
@@ -182,8 +185,10 @@ void drawToggle(Canvas& canvas, const Rect& rect, bool on) {
 }
 
 void drawButton(Canvas& canvas, const Rect& rect, const std::string& label, bool primary,
-                bool focused, float opacity) {
-    if (primary) {
+                bool focused, float opacity, bool danger = false) {
+    if (danger) {
+        canvas.fillRoundRect(rect, 12.0f, withAlpha(theme::kDanger, opacity));
+    } else if (primary) {
         canvas.fillRoundRect(rect, 12.0f, withAlpha(theme::kAccent, opacity));
     } else {
         canvas.fillRoundRect(rect, 12.0f, withAlpha(theme::kPanelHover, opacity));
@@ -196,7 +201,7 @@ void drawButton(Canvas& canvas, const Rect& rect, const std::string& label, bool
     TextParams params;
     params.weight = Weight::Medium;
     params.size = 14.0f;
-    params.color = primary ? hex(0x0A0A0C) : theme::kText;
+    params.color = (primary || danger) ? hex(0x0A0A0C) : theme::kText;
     params.opacity = opacity;
     drawTextCentered(canvas, rect.x + rect.w * 0.5f, rect.y + rect.h * 0.5f, label, params);
 }
@@ -223,6 +228,9 @@ void App::render(Canvas& canvas) {
             break;
         case Section::Internal:
             renderExplorer(canvas, internalView_, internal_);
+            break;
+        case Section::Apps:
+            renderApps(canvas);
             break;
         case Section::Ftp:
             renderFtp(canvas);
@@ -300,8 +308,9 @@ void App::renderSidebar(Canvas& canvas) {
     group.color = theme::kTextMuted;
     group.spacing = 1.6f;
     drawText(canvas, 32.0f, 142.0f, "STOCKAGE", group);
-    drawText(canvas, 32.0f, 280.0f, "RÉSEAU", group);
-    drawText(canvas, 32.0f, 366.0f, "APPLICATION", group);
+    drawText(canvas, 32.0f, 280.0f, "CONSOLE", group);
+    drawText(canvas, 32.0f, 366.0f, "RÉSEAU", group);
+    drawText(canvas, 32.0f, 452.0f, "APPLICATION", group);
 
     // Sliding active indicator
     const float targetY = nav::itemY(nav::indexForSection(section_)) + 12.0f;
@@ -776,6 +785,118 @@ void App::renderFtp(Canvas& canvas) {
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
+void App::renderApps(Canvas& canvas) {
+    constexpr float kRowHeight = 64.0f;
+    constexpr float kStride = 70.0f;
+
+    if (!apps_.error.empty() || apps_.entries.empty()) {
+        const bool blocked = !apps_.error.empty();
+        drawIcon(canvas, blocked ? Icon::Warning : Icon::Apps,
+                 Rect{kContentX + kContentW * 0.5f - 22.0f, kContentTop + 96.0f, 44.0f, 44.0f},
+                 blocked ? theme::kDanger : theme::kTextMuted, 0.9f);
+
+        TextParams title;
+        title.weight = Weight::Medium;
+        title.size = 17.0f;
+        title.opacity = 0.92f;
+        drawTextCentered(canvas, kContentX + kContentW * 0.5f, kContentTop + 166.0f,
+                         blocked ? "Applications indisponibles" : "Aucune application installée",
+                         title);
+
+        if (blocked) {
+            TextParams message;
+            message.weight = Weight::Light;
+            message.size = 13.0f;
+            message.color = theme::kTextMuted;
+            const std::vector<std::string> lines =
+                wrapText(apps_.error, message, kContentW - 200.0f);
+            float y = kContentTop + 202.0f;
+            for (const std::string& line : lines) {
+                drawTextCentered(canvas, kContentX + kContentW * 0.5f, y, line, message);
+                y += 20.0f;
+            }
+        }
+        return;
+    }
+
+    TextParams column;
+    column.weight = Weight::Medium;
+    column.size = 10.0f;
+    column.color = hex(0x82828F);
+    column.spacing = 1.4f;
+    drawText(canvas, kContentX + 72.0f, kListHeaderY, "APPLICATION", column);
+    drawTextRight(canvas, kContentRight, kListHeaderY + 7.0f, "VERSION", column);
+
+    canvas.pushClip(
+        Rect{kContentX - 8.0f, kContentTop, kContentW + 16.0f, kContentBottom - kContentTop});
+
+    const int count = static_cast<int>(apps_.entries.size());
+    const int first = std::max(0, static_cast<int>(apps_.scroll / kStride) - 1);
+    for (int i = first; i < count; ++i) {
+        const float y = kContentTop + static_cast<float>(i) * kStride - apps_.scroll;
+        if (y > kContentBottom) {
+            break;
+        }
+        if (y + kRowHeight < kContentTop - kStride) {
+            continue;
+        }
+
+        const TitleEntry& entry = apps_.entries[static_cast<std::size_t>(i)];
+        const bool selected = i == apps_.cursor;
+        const Rect row{kContentX, y, kContentW, kRowHeight};
+
+        if (selected) {
+            canvas.fillRoundRect(row, 14.0f, theme::kPanelActive);
+            canvas.strokeRoundRect(row, 14.0f, theme::kBorderStrong, 1.0f);
+            canvas.fillRoundRect(Rect{row.x + 1.0f, y + 20.0f, 3.0f, 24.0f}, 1.5f,
+                                 rainbow(time_ * 0.25f));
+        } else if (i % 2 == 1) {
+            canvas.fillRoundRect(row, 14.0f, withAlpha(hex(0x0B0B0E), 0.35f));
+        }
+
+        const Rect iconBox{row.x + 16.0f, y + (kRowHeight - 44.0f) * 0.5f, 44.0f, 44.0f};
+        const Image* icon = titleIcon(entry);
+        if (icon != nullptr) {
+            canvas.drawImageRounded(*icon, iconBox, 12.0f, 1.0f);
+        } else {
+            canvas.fillRoundRect(iconBox, 12.0f, hex(0x1D1D24));
+            drawIcon(canvas, Icon::Apps, Rect{iconBox.x + 11.0f, iconBox.y + 11.0f, 22.0f, 22.0f},
+                     theme::kTextMuted, 0.7f);
+        }
+
+        TextParams name;
+        name.weight = selected ? Weight::Medium : Weight::Regular;
+        name.size = 14.0f;
+        name.color = selected ? theme::kText : hex(0xE8E8F0);
+        drawText(canvas, iconBox.right() + 16.0f, y + 13.0f,
+                 gFonts->ellipsize(TextStyle{name.weight, name.size}, entry.name, kContentW - 420.0f),
+                 name);
+
+        char details[256];
+        std::snprintf(details, sizeof(details), "%016llX · %s%s%s",
+                      static_cast<unsigned long long>(entry.id),
+                      entry.author.empty() ? "Éditeur inconnu" : entry.author.c_str(),
+                      entry.updates > 0 ? " · Mise à jour" : "",
+                      entry.dlc > 0 ? (" · " + std::to_string(entry.dlc) + " DLC").c_str() : "");
+        TextParams meta;
+        meta.weight = Weight::Light;
+        meta.size = 11.0f;
+        meta.color = theme::kTextMuted;
+        drawText(canvas, iconBox.right() + 16.0f, y + 36.0f,
+                 gFonts->ellipsize(TextStyle{Weight::Light, 11.0f}, details, kContentW - 420.0f),
+                 meta);
+
+        TextParams version;
+        version.weight = Weight::Regular;
+        version.size = 12.0f;
+        version.color = selected ? theme::kTextSecondary : hex(0x9A9AA8);
+        drawTextRight(canvas, kContentRight - 16.0f, y + kRowHeight * 0.5f,
+                      entry.version.empty() ? "—" : entry.version, version);
+    }
+
+    canvas.popClip();
+}
+
 void App::renderSettings(Canvas& canvas) {
     struct Row {
         const char* label;
@@ -869,7 +990,7 @@ void App::renderAbout(Canvas& canvas) {
     version.weight = Weight::Light;
     version.size = 13.0f;
     version.color = theme::kTextSecondary;
-    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 1.0.0  ·  homebrew pour Nintendo Switch",
+    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 1.1.0  ·  homebrew pour Nintendo Switch",
              version);
 
     TextParams body;
@@ -943,6 +1064,9 @@ void App::renderFooter(Canvas& canvas) {
             hints = "A Ouvrir    B Retour    X Sélection    Y Actions    L Vue    R Tri    "
                     "− Rechercher    ZL/ZR Sections    + Quitter";
             break;
+        case Section::Apps:
+            hints = "A Supprimer définitivement    ↑↓ Navigation    ZL/ZR Sections    + Quitter";
+            break;
         case Section::Ftp:
             hints = "A Démarrer / Arrêter    ZL/ZR Sections    + Quitter";
             break;
@@ -966,6 +1090,17 @@ void App::renderFooter(Canvas& canvas) {
                           count == 1 ? "" : "s", static_cast<int>(view.selection.size()),
                           view.selection.size() == 1 ? "" : "s");
         }
+        TextParams stats;
+        stats.weight = Weight::Light;
+        stats.size = 11.0f;
+        stats.color = theme::kTextMuted;
+        drawTextRight(canvas, kContentRight, kFooterY + 7.0f, buffer, stats);
+    }
+
+    if (section_ == Section::Apps) {
+        char buffer[64];
+        const int count = static_cast<int>(apps_.entries.size());
+        std::snprintf(buffer, sizeof(buffer), "%d application%s", count, count == 1 ? "" : "s");
         TextParams stats;
         stats.weight = Weight::Light;
         stats.size = 11.0f;
@@ -1046,7 +1181,8 @@ void App::renderDialog(Canvas& canvas) {
         const Rect cancel{panel.x + panel.w - 352.0f, panel.bottom() - 66.0f, 160.0f, 44.0f};
         const Rect confirm{panel.x + panel.w - 180.0f, panel.bottom() - 66.0f, 152.0f, 44.0f};
         drawButton(canvas, cancel, "Annuler", false, dialogFocus_ == 0, opacity);
-        drawButton(canvas, confirm, "Confirmer", true, dialogFocus_ == 1, opacity);
+        drawButton(canvas, confirm, pendingAction_ == 2 ? "Supprimer" : "Confirmer", true,
+                   dialogFocus_ == 1, opacity, pendingAction_ == 2);
         return;
     }
 

@@ -176,9 +176,10 @@ int main(int argc, char** argv) {
     std::unique_ptr<nxf::StorageApi> sd = nxf::openSdStorage();
     std::unique_ptr<nxf::StorageApi> internal = nxf::openInternalStorage();
     std::unique_ptr<nxf::FtpController> ftp = nxf::createFtpServer(*sd, *internal);
+    std::unique_ptr<nxf::TitleApi> titles = nxf::createTitleApi();
 
     SwitchPlatform platform;
-    nxf::App app(fonts, platform, *ftp, *sd, *internal);
+    nxf::App app(fonts, platform, *ftp, *sd, *internal, *titles);
     app.applySettings(settings);
     app.setDefaultView(settings.gridDefault ? nxf::ViewMode::Grid : nxf::ViewMode::List);
     if (logo.valid()) {

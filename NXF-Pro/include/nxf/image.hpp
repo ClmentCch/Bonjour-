@@ -14,4 +14,8 @@ namespace nxf {
 /// data cannot be decoded.
 bool loadImageFromMemory(const void* data, std::size_t size, Image& out);
 
+/// Decodes and box-downsamples so the longest side is at most `maxSize` pixels.
+/// Used for application icons, which stay small enough to cache.
+bool loadImageScaled(const void* data, std::size_t size, int maxSize, Image& out);
+
 } // namespace nxf

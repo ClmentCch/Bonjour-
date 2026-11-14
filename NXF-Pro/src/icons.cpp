@@ -303,6 +303,13 @@ void drawIcon(Canvas& canvas, Icon icon, const Rect& box, Color color, float opa
             pen.line(12.0f, 9.6f, 12.0f, 14.6f, 1.8f);
             pen.circle(12.0f, 17.4f, 1.1f);
             break;
+        case Icon::Apps:
+            // 2x2 app grid: filled squares, distinct from the outlined view grid.
+            pen.rect(3.6f, 3.6f, 7.2f, 7.2f, 2.0f);
+            pen.rect(13.2f, 3.6f, 7.2f, 7.2f, 2.0f);
+            pen.rect(3.6f, 13.2f, 7.2f, 7.2f, 2.0f);
+            pen.rect(13.2f, 13.2f, 7.2f, 7.2f, 2.0f);
+            break;
         case Icon::Power:
             pen.arc(12.0f, 12.6f, 7.4f, -60.0f, 240.0f, 2.0f);
             pen.line(12.0f, 3.2f, 12.0f, 11.4f, 2.0f);

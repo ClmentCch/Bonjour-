@@ -17,10 +17,8 @@
 #include <string>
 #include <vector>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
 #include "nxf/app.hpp"
+#include "nxf/image.hpp"
 
 namespace {
 
@@ -43,22 +41,11 @@ bool readFile(const char* path, std::vector<std::uint8_t>& out) {
 }
 
 bool loadImage(const char* path, nxf::Image& image) {
-    int width = 0, height = 0, channels = 0;
-    unsigned char* data = stbi_load(path, &width, &height, &channels, 4);
-    if (data == nullptr) {
+    std::vector<std::uint8_t> bytes;
+    if (!readFile(path, bytes)) {
         return false;
     }
-    image.width = width;
-    image.height = height;
-    image.pixels.resize(static_cast<std::size_t>(width) * height);
-    for (std::size_t i = 0; i < image.pixels.size(); ++i) {
-        image.pixels[i] = static_cast<std::uint32_t>(data[i * 4 + 0]) |
-                          (static_cast<std::uint32_t>(data[i * 4 + 1]) << 8) |
-                          (static_cast<std::uint32_t>(data[i * 4 + 2]) << 16) |
-                          (static_cast<std::uint32_t>(data[i * 4 + 3]) << 24);
-    }
-    stbi_image_free(data);
-    return true;
+    return nxf::loadImageFromMemory(bytes.data(), bytes.size(), image);
 }
 
 void writePpm(const std::string& path, const std::vector<std::uint32_t>& pixels) {
@@ -172,6 +159,30 @@ struct FakeFtp : nxf::FtpController {
     }
 };
 
+struct FakeTitles : nxf::TitleApi {
+    std::vector<nxf::TitleEntry> entries;
+
+    bool available() const override { return true; }
+
+    bool list(std::vector<nxf::TitleEntry>& out, std::string&) override {
+        out = entries;
+        return true;
+    }
+
+    bool remove(std::uint64_t id, nxf::TitleRemovalReport& report, std::string&) override {
+        for (auto it = entries.begin(); it != entries.end(); ++it) {
+            if (it->id == id) {
+                entries.erase(it);
+                break;
+            }
+        }
+        report.contentRemoved = true;
+        report.savesRemoved = 1;
+        report.leftoversRemoved = 1;
+        return true;
+    }
+};
+
 struct FakePlatform : nxf::Platform {
     bool promptText(const std::string&, const std::string&, std::string&) override { return false; }
     void settingsChanged(const nxf::SettingsState&) override {}
@@ -213,7 +224,37 @@ int main(int argc, char** argv) {
     FakeFtp ftp;
     FakePlatform platform;
 
-    nxf::App app(fonts, platform, ftp, sd, internal);
+    std::vector<std::uint8_t> iconBytes;
+    readFile((assets + "/logonxf.png").c_str(), iconBytes);
+
+    FakeTitles titles;
+    auto addTitle = [&](std::uint64_t id, const char* name, const char* author, const char* version,
+                        int updates, int dlc, bool withIcon) {
+        nxf::TitleEntry entry;
+        entry.id = id;
+        entry.name = name;
+        entry.author = author;
+        entry.version = version;
+        entry.updates = updates;
+        entry.dlc = dlc;
+        if (withIcon) {
+            entry.iconJpeg = iconBytes;
+        }
+        titles.entries.push_back(std::move(entry));
+    };
+    addTitle(0x0100000000010000ull, "The Legend of Zelda: Tears of the Kingdom", "Nintendo",
+             "v1.2.1", 1, 2, true);
+    addTitle(0x0100152000022000ull, "Mario Kart 8 Deluxe", "Nintendo", "v3.0.1", 1, 6, true);
+    addTitle(0x0100E0F011200000ull, "NXF Pro", "ClmentCch", "v1.1.0", 0, 0, true);
+    addTitle(0x01006A800016E000ull, "Super Smash Bros. Ultimate", "Nintendo", "v13.0.1", 1, 12,
+             false);
+    addTitle(0x0100000000001000ull, "sdmc:/switch/hbmenu.nro", "devkitPro", "", 0, 0, false);
+    addTitle(0x01002F0011CA0000ull, "Animal Crossing: New Horizons", "Nintendo", "v2.0.7", 1, 0,
+             false);
+    addTitle(0x0100B0C011200000ull, "RetroArch", "Libretro", "v1.19.0", 0, 0, false);
+    addTitle(0x0100DCA0064A6000ull, "Moonlight", "Moonlight Streaming", "v1.1.0", 0, 0, false);
+
+    nxf::App app(fonts, platform, ftp, sd, internal, titles);
     if (logo.valid()) {
         app.setLogo(&logo);
     }
@@ -268,10 +309,28 @@ int main(int argc, char** argv) {
     step(30);
     shot("04_internal_unavailable");
 
+    // Installed applications.
+    press([](nxf::InputState& in) { in.nextSection = true; });
+    step(50);
+    shot("05_apps");
+
+    press([](nxf::InputState& in) { in.down = true; });
+    press([](nxf::InputState& in) { in.down = true; });
+    press([](nxf::InputState& in) { in.down = true; });
+    step(25);
+    shot("06_apps_selected");
+
+    // Complete removal confirmation.
+    press([](nxf::InputState& in) { in.accept = true; });
+    step(25);
+    shot("07_app_delete");
+    press([](nxf::InputState& in) { in.back = true; });
+    step(10);
+
     // FTP stopped.
     press([](nxf::InputState& in) { in.nextSection = true; });
     step(30);
-    shot("05_ftp_stopped");
+    shot("08_ftp_stopped");
 
     // FTP running with a client.
     press([](nxf::InputState& in) { in.accept = true; });
@@ -281,20 +340,20 @@ int main(int argc, char** argv) {
     ftp.log.push_back("PWD /sd/switch");
     ftp.log.push_back("LIST 200 OK");
     step(40);
-    shot("06_ftp_running");
+    shot("09_ftp_running");
 
     // Settings.
     press([](nxf::InputState& in) { in.nextSection = true; });
     step(30);
-    shot("07_settings");
+    shot("10_settings");
 
     // About.
     press([](nxf::InputState& in) { in.nextSection = true; });
     step(30);
-    shot("08_about");
+    shot("11_about");
 
     // Back to SD in list view.
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         press([](nxf::InputState& in) { in.prevSection = true; });
     }
     step(20);
@@ -307,10 +366,10 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 6; ++i) {
         press([](nxf::InputState& in) { in.down = true; });
     }
-    shot("09_actions_delete");
+    shot("12_actions_delete");
     press([](nxf::InputState& in) { in.accept = true; });
     step(20);
-    shot("10_confirm_delete");
+    shot("13_confirm_delete");
 
     // Properties.
     press([](nxf::InputState& in) { in.back = true; });
@@ -322,7 +381,7 @@ int main(int argc, char** argv) {
     }
     press([](nxf::InputState& in) { in.accept = true; });
     step(20);
-    shot("11_properties");
+    shot("14_properties");
 
     std::printf("\nall screens rendered\n");
     return 0;

@@ -2,7 +2,8 @@
 
 Gestionnaire de fichiers natif pour Nintendo Switch, avec un **véritable serveur FTP**
 intégré : pilotez la carte SD et la mémoire interne de la console depuis un PC,
-un Mac, un téléphone ou un autre appareil du même réseau.
+un Mac, un téléphone ou un autre appareil du même réseau, et supprimez
+complètement les jeux installés.
 
 Interface noire premium, typographie Montserrat, dégradés animés et animations
 fluides — sans jamais sacrifier la réactivité sur la console.
@@ -12,6 +13,7 @@ fluides — sans jamais sacrifier la réactivité sur la console.
 ## Sommaire
 
 - [Fonctionnalités](#fonctionnalités)
+- [Applications installées](#applications-installées)
 - [Installation](#installation)
 - [Serveur FTP](#serveur-ftp)
 - [Raccourcis](#raccourcis)
@@ -67,6 +69,34 @@ Montserrat est la seule police de l'application, embarquée dans le binaire :
 
 Aucune police système n'est utilisée. Les fichiers `.ttf` et leur licence
 (`assets/fonts/OFL.txt`, SIL Open Font License 1.1) sont fournis.
+
+## Applications installées
+
+La section **Applications** (barre latérale, groupe CONSOLE) liste tous les
+titres installés sur la console : jeux, homebrews et applications système.
+Chaque ligne affiche l'icône officielle, le nom, l'éditeur, l'identifiant du
+titre, la version et la présence de mises à jour ou de DLC.
+
+![Applications installées](docs/applications.png)
+
+`A` (ou `Y`) ouvre la suppression **complète** du titre sélectionné. Après
+confirmation, NXF Pro efface :
+
+1. le jeu lui-même, sur la mémoire interne comme sur la carte SD ;
+2. toutes ses mises à jour ;
+3. tous ses DLC ;
+4. ses fichiers de sauvegarde, sur la NAND et sur la carte SD ;
+5. les dossiers de contenu Atmosphère liés au titre (`atmosphere/contents/<id>`
+   et `atmosphere/titles/<id>`), donc mods et cheats.
+
+Il ne reste plus aucune trace du jeu après l'opération, et la liste se met à
+jour immédiatement.
+
+![Confirmation de suppression](docs/applications-suppression.png)
+
+> La suppression utilise le service `ns` de la console : elle exige un lancement
+> en **mode application** (titre complet), comme toutes les opérations sur les
+> titres installés.
 
 ## Installation
 
@@ -130,6 +160,9 @@ Le panneau **Activité** journalise les connexions et les transferts en direct.
 | `ZL` / `ZR` | Section précédente / suivante |
 | `+` | Quitter |
 | Stick / croix | Naviguer |
+
+Dans **Applications**, `A` ou `Y` ouvre la suppression définitive du titre
+sélectionné.
 
 ## Compilation
 

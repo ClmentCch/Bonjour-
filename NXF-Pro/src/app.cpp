@@ -4,6 +4,8 @@
  */
 #include "nxf/app.hpp"
 
+#include "nxf/image.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -21,8 +23,8 @@ constexpr float kGridStride = kGridCardH + kGridGap;
 } // namespace
 
 App::App(FontSet& fonts, Platform& platform, FtpController& ftp, StorageApi& sd,
-         StorageApi& internal)
-    : fonts_(fonts), platform_(platform), ftp_(ftp), sd_(sd), internal_(internal) {
+         StorageApi& internal, TitleApi& titles)
+    : fonts_(fonts), platform_(platform), ftp_(ftp), sd_(sd), internal_(internal), titleApi_(titles) {
     sdView_.path = sd_.root();
     internalView_.path = internal_.root();
     sdView_.view = settings_.gridDefault ? ViewMode::Grid : ViewMode::List;
@@ -68,6 +70,9 @@ void App::switchSection(Section section) {
     ExplorerState& target = viewFor(section);
     if (!target.loaded) {
         refresh(target, storageFor(section));
+    }
+    if (section == Section::Apps && !apps_.loaded) {
+        refreshTitles();
     }
 }
 
@@ -329,6 +334,101 @@ void App::requestDelete() {
     pendingAction_ = 1;
 }
 
+void App::refreshTitles() {
+    apps_.icons.clear();
+    apps_.entries.clear();
+    apps_.cursor = 0;
+    apps_.scroll = 0.0f;
+    apps_.scrollTarget = 0.0f;
+    apps_.loaded = true;
+    apps_.error.clear();
+
+    if (!titleApi_.available()) {
+        apps_.error = "Service des applications indisponible. Lancez NXF Pro en mode "
+                      "application (titre complet) pour gérer les jeux installés.";
+        return;
+    }
+
+    std::vector<TitleEntry> titles;
+    std::string error;
+    if (!titleApi_.list(titles, error)) {
+        apps_.error = error.empty() ? "Impossible de lire les applications installées" : error;
+        return;
+    }
+    apps_.entries = std::move(titles);
+}
+
+void App::requestTitleDelete() {
+    if (!titleApi_.available() || apps_.error.size() > 0) {
+        return;
+    }
+    if (apps_.cursor < 0 || apps_.cursor >= static_cast<int>(apps_.entries.size())) {
+        return;
+    }
+
+    const TitleEntry& entry = apps_.entries[static_cast<std::size_t>(apps_.cursor)];
+    pendingTitleId_ = entry.id;
+    dialogTitle_ = "Supprimer définitivement";
+    dialogMessage_ = "« " + entry.name +
+                     " » sera effacé : jeu, mises à jour, DLC, sauvegardes et dossiers "
+                     "Atmosphère liés à ce titre. Aucune récupération possible.";
+    dialogActions_.clear();
+    dialog_ = DialogKind::Confirm;
+    dialogAnim_ = 0.0f;
+    dialogFocus_ = 0;
+    pendingAction_ = 2;
+}
+
+const Image* App::titleIcon(const TitleEntry& entry) {
+    auto existing = apps_.icons.find(entry.id);
+    if (existing != apps_.icons.end()) {
+        return existing->second.valid() ? &existing->second : nullptr;
+    }
+
+    Image image;
+    if (!entry.iconJpeg.empty()) {
+        loadImageScaled(entry.iconJpeg.data(), entry.iconJpeg.size(), 72, image);
+    }
+    auto inserted = apps_.icons.emplace(entry.id, std::move(image));
+    return inserted.first->second.valid() ? &inserted.first->second : nullptr;
+}
+
+void App::updateApps(const InputState& input) {
+    const int count = static_cast<int>(apps_.entries.size());
+    if (count == 0) {
+        return;
+    }
+
+    if (input.up) {
+        apps_.cursor = std::max(0, apps_.cursor - 1);
+    }
+    if (input.down) {
+        apps_.cursor = std::min(count - 1, apps_.cursor + 1);
+    }
+    if (input.left) {
+        apps_.cursor = std::max(0, apps_.cursor - 5);
+    }
+    if (input.right) {
+        apps_.cursor = std::min(count - 1, apps_.cursor + 5);
+    }
+
+    constexpr float kStride = 70.0f;
+    const float visible = kContentBottom - kContentTop;
+    const float maxScroll = std::max(0.0f, static_cast<float>(count) * kStride - visible);
+    const float cursorTop = static_cast<float>(apps_.cursor) * kStride;
+
+    if (cursorTop < apps_.scrollTarget) {
+        apps_.scrollTarget = cursorTop;
+    } else if (cursorTop + kStride > apps_.scrollTarget + visible) {
+        apps_.scrollTarget = cursorTop + kStride - visible;
+    }
+    apps_.scrollTarget = std::max(0.0f, std::min(maxScroll, apps_.scrollTarget));
+
+    if (input.accept || input.actions) {
+        requestTitleDelete();
+    }
+}
+
 void App::closeDialog() {
     dialog_ = DialogKind::None;
     dialogAnim_ = 0.0f;
@@ -508,6 +608,32 @@ void App::runAction(int index) {
 }
 
 void App::confirmDialog() {
+    if (pendingAction_ == 2) {
+        const std::uint64_t id = pendingTitleId_;
+        std::string name = "Application";
+        for (const TitleEntry& entry : apps_.entries) {
+            if (entry.id == id) {
+                name = entry.name;
+                break;
+            }
+        }
+        closeDialog();
+
+        TitleRemovalReport report;
+        std::string error;
+        if (titleApi_.remove(id, report, error)) {
+            std::string message = "« " + name + " » supprimé";
+            if (report.savesRemoved > 0) {
+                message += " · " + std::to_string(report.savesRemoved) + " sauvegarde(s)";
+            }
+            showToast(message);
+            refreshTitles();
+        } else {
+            showToast(error.empty() ? "Suppression impossible" : error);
+        }
+        return;
+    }
+
     if (pendingAction_ != 1) {
         closeDialog();
         return;
@@ -570,6 +696,7 @@ void App::update(const InputState& input) {
         state->appear = std::min(1.0f, state->appear + dt * animScale / 0.55f);
         state->scroll = approach(state->scroll, state->scrollTarget, 16.0f * animScale, dt);
     }
+    apps_.scroll = approach(apps_.scroll, apps_.scrollTarget, 16.0f * animScale, dt);
     navIndicatorY_ = approach(navIndicatorY_, nav::itemY(nav::indexForSection(section_)) + 12.0f,
                               16.0f * animScale, dt);
 
@@ -595,6 +722,9 @@ void App::update(const InputState& input) {
         case Section::Internal:
             updateExplorer(input);
             break;
+        case Section::Apps:
+            updateApps(input);
+            break;
         case Section::Ftp:
             updateFtpScreen(input);
             break;
@@ -614,7 +744,7 @@ void App::handleShortcuts(const InputState& input) {
         switchSection(static_cast<Section>(index));
     }
     if (input.nextSection) {
-        const int index = std::min(4, static_cast<int>(section_) + 1);
+        const int index = std::min(nav::kCount - 1, static_cast<int>(section_) + 1);
         switchSection(static_cast<Section>(index));
     }
     if (input.toggleView && (section_ == Section::Sd || section_ == Section::Internal)) {
