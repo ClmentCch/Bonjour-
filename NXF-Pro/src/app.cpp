@@ -7,6 +7,9 @@
 #include "nxf/image.hpp"
 
 #include <algorithm>
+#include <cstring>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -73,6 +76,9 @@ void App::switchSection(Section section) {
     }
     if (section == Section::Apps && !apps_.loaded) {
         refreshTitles();
+    }
+    if (section == Section::Dbi && !dbi_.scanned) {
+        scanNspFiles();
     }
 }
 
@@ -673,6 +679,12 @@ void App::showToast(const std::string& message) {
 void App::update(const InputState& input) {
     time_ = input.time;
     const float dt = std::min(input.dt, 0.1f);
+
+    if (setup_.active) {
+        updateSetup(input);
+        return;
+    }
+
     const float animScale = settings_.animations ? 1.0f : 20.0f;
 
     intro_ = std::min(1.0f, intro_ + dt * animScale / 0.45f);
@@ -724,6 +736,9 @@ void App::update(const InputState& input) {
             break;
         case Section::Apps:
             updateApps(input);
+            break;
+        case Section::Dbi:
+            updateDbi(input);
             break;
         case Section::Ftp:
             updateFtpScreen(input);
@@ -909,6 +924,26 @@ void App::updateSettingsScreen(const InputState& input) {
 }
 
 void App::updateDialog(const InputState& input) {
+    if (dialog_ == DialogKind::NspConflict) {
+        if (input.left || input.right || input.up || input.down) {
+            dialogFocus_ = dialogFocus_ == 0 ? 1 : 0;
+        }
+        if (input.accept) {
+            if (dialogFocus_ == 1) {
+                confirmNspInstall();
+            } else {
+                closeDialog();
+                showToast(tr(Txt::CancelNoRemove));
+            }
+            return;
+        }
+        if (input.back) {
+            closeDialog();
+            showToast(tr(Txt::CancelNoRemove));
+        }
+        return;
+    }
+
     if (dialog_ == DialogKind::Confirm) {
         if (input.left || input.right) {
             dialogFocus_ = dialogFocus_ == 0 ? 1 : 0;
@@ -1013,6 +1048,266 @@ void App::updateTouch(const InputState& input) {
         syncScroll(state);
     }
     (void)api;
+}
+
+// ---------------------------------------------------------------------------
+// First run, DBI and NSP files
+// ---------------------------------------------------------------------------
+namespace {
+
+bool endsWithNoCase(const std::string& text, const char* suffix) {
+    const std::size_t length = std::strlen(suffix);
+    if (text.size() < length) {
+        return false;
+    }
+    for (std::size_t i = 0; i < length; ++i) {
+        char c = text[text.size() - length + i];
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+        if (c != suffix[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Reads the "[0100XXXXXXXXXXXX]" convention used by NSP file names.
+std::uint64_t titleIdFromName(const std::string& name) {
+    for (std::size_t open = name.find('['); open != std::string::npos;
+         open = name.find('[', open + 1)) {
+        const std::size_t close = name.find(']', open);
+        if (close == std::string::npos || close - open - 1 != 16) {
+            continue;
+        }
+        std::uint64_t value = 0;
+        bool valid = true;
+        for (std::size_t i = open + 1; i < close; ++i) {
+            const char c = name[i];
+            value <<= 4;
+            if (c >= '0' && c <= '9') {
+                value |= static_cast<std::uint64_t>(c - '0');
+            } else if (c >= 'a' && c <= 'f') {
+                value |= static_cast<std::uint64_t>(c - 'a' + 10);
+            } else if (c >= 'A' && c <= 'F') {
+                value |= static_cast<std::uint64_t>(c - 'A' + 10);
+            } else {
+                valid = false;
+                break;
+            }
+        }
+        if (valid && value != 0) {
+            return value;
+        }
+    }
+    return 0;
+}
+
+} // namespace
+
+void App::updateSetup(const InputState& input) {
+    const float dt = std::min(input.dt, 0.1f);
+    setup_.appear = std::min(1.0f, setup_.appear + dt / 0.35f);
+
+    if (input.quit) {
+        quitRequested_ = true;
+        return;
+    }
+    if (input.up || input.left) {
+        setup_.selected = (setup_.selected + kLangCount - 1) % kLangCount;
+    }
+    if (input.down || input.right) {
+        setup_.selected = (setup_.selected + 1) % kLangCount;
+    }
+    setup_.scrollTarget = static_cast<float>(setup_.selected);
+    setup_.scroll = approach(setup_.scroll, setup_.scrollTarget, 14.0f, dt);
+
+    if (input.accept) {
+        saveLanguage();
+    }
+}
+
+void App::saveLanguage() {
+    settings_.language = langInfo(setup_.selected).lang;
+    setLang(settings_.language);
+    platform_.savePreferences(settings_);
+    settingsDirty_ = true;
+    setup_.active = false;
+    intro_ = 0.0f;
+    showToast(tr(Txt::LanguageSaved));
+}
+
+void App::scanNspFiles() {
+    dbi_.nsps.clear();
+    dbi_.error.clear();
+    dbi_.cursor = 0;
+    dbi_.scroll = 0.0f;
+    dbi_.scrollTarget = 0.0f;
+    dbi_.scanned = true;
+
+    std::vector<TitleEntry> installed;
+    std::string error;
+    if (titleApi_.available()) {
+        titleApi_.list(installed, error);
+    }
+    installedCount_ = static_cast<int>(installed.size());
+
+    for (const std::string& base : nspRoots_) {
+        DIR* dir = opendir(base.c_str());
+        if (dir == nullptr) {
+            continue;
+        }
+        while (struct dirent* entry = readdir(dir)) {
+            if (entry->d_name[0] == '.') {
+                continue;
+            }
+            const std::string name = entry->d_name;
+            if (!endsWithNoCase(name, ".nsp")) {
+                continue;
+            }
+            const std::string full = base.back() == '/' ? base + name : base + "/" + name;
+            struct stat info {};
+            if (stat(full.c_str(), &info) != 0 || S_ISDIR(info.st_mode)) {
+                continue;
+            }
+
+            NspEntry nsp;
+            nsp.path = full;
+            nsp.name = name;
+            nsp.size = static_cast<std::uint64_t>(info.st_size);
+            nsp.titleId = titleIdFromName(name);
+            for (const TitleEntry& title : installed) {
+                if (title.id == nsp.titleId) {
+                    nsp.installed = true;
+                    break;
+                }
+            }
+            dbi_.nsps.push_back(std::move(nsp));
+        }
+        closedir(dir);
+    }
+
+    std::sort(dbi_.nsps.begin(), dbi_.nsps.end(), [](const NspEntry& a, const NspEntry& b) {
+        return a.name < b.name;
+    });
+}
+
+void App::updateDbi(const InputState& input) {
+    if (dbi_.view == DbiView::Cards) {
+        if (input.left && (dbi_.card % 2) == 1) {
+            --dbi_.card;
+        }
+        if (input.right && (dbi_.card % 2) == 0) {
+            ++dbi_.card;
+        }
+        if (input.up && dbi_.card >= 2) {
+            dbi_.card -= 2;
+        }
+        if (input.down && dbi_.card < 2) {
+            dbi_.card += 2;
+        }
+
+        if (input.accept) {
+            switch (dbi_.card) {
+                case 0: {
+                    if (ftpState_.running) {
+                        ftp_.stop();
+                        showToast("Serveur FTP arrêté");
+                    } else {
+                        std::string error;
+                        if (ftp_.start(settings_.ftpPort, settings_.ftpUser, settings_.ftpPassword,
+                                       error)) {
+                            showToast("Serveur FTP démarré");
+                        } else {
+                            showToast(error.empty() ? "Démarrage impossible" : error);
+                        }
+                    }
+                    ftpState_ = ftp_.snapshot();
+                    break;
+                }
+                case 1:
+                    dbi_.view = DbiView::NspList;
+                    if (!dbi_.scanned) {
+                        scanNspFiles();
+                    }
+                    break;
+                case 2:
+                    switchSection(Section::Apps);
+                    break;
+                case 3: {
+                    std::uint64_t total = 0;
+                    std::uint64_t freeBytes = 0;
+                    sd_.space(total, freeBytes);
+                    showToast(formatSize(freeBytes) + " libres sur " + formatSize(total));
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+        return;
+    }
+
+    const int count = static_cast<int>(dbi_.nsps.size());
+    if (input.up && dbi_.cursor > 0) {
+        --dbi_.cursor;
+    }
+    if (input.down && dbi_.cursor + 1 < count) {
+        ++dbi_.cursor;
+    }
+    constexpr float kStride = 64.0f;
+    const float visible = kContentBottom - kContentTop;
+    const float maxScroll = std::max(0.0f, static_cast<float>(count) * kStride - visible);
+    const float cursorTop = static_cast<float>(dbi_.cursor) * kStride;
+    if (cursorTop < dbi_.scrollTarget) {
+        dbi_.scrollTarget = cursorTop;
+    } else if (cursorTop + kStride > dbi_.scrollTarget + visible) {
+        dbi_.scrollTarget = cursorTop + kStride - visible;
+    }
+    dbi_.scrollTarget = std::max(0.0f, std::min(maxScroll, dbi_.scrollTarget));
+
+    if (input.accept || input.actions) {
+        requestNspInstall();
+    }
+    if (input.back) {
+        dbi_.view = DbiView::Cards;
+    }
+}
+
+void App::requestNspInstall() {
+    if (dbi_.cursor < 0 || dbi_.cursor >= static_cast<int>(dbi_.nsps.size())) {
+        return;
+    }
+    const NspEntry& nsp = dbi_.nsps[static_cast<std::size_t>(dbi_.cursor)];
+    if (!nsp.installed) {
+        showToast(tr(Txt::InstallUnavailable));
+        return;
+    }
+
+    if (!apps_.loaded) {
+        refreshTitles();
+    }
+    pendingNsp_ = dbi_.cursor;
+    conflictTitleId_ = nsp.titleId;
+    dialogTitle_ = tr(Txt::RemoveAppContent);
+    dialogMessage_.clear();
+    dialogActions_.clear();
+    dialog_ = DialogKind::NspConflict;
+    dialogAnim_ = 0.0f;
+    dialogFocus_ = 0;
+    pendingAction_ = -1;
+}
+
+void App::confirmNspInstall() {
+    const int index = pendingNsp_;
+    closeDialog();
+    if (index < 0 || index >= static_cast<int>(dbi_.nsps.size())) {
+        return;
+    }
+
+    // Installing an NSP requires the NCM content pipeline (CNMT + tickets),
+    // which this build does not ship. Never erase content we cannot replace.
+    showToast(tr(Txt::InstallUnavailable));
 }
 
 } // namespace nxf

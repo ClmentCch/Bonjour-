@@ -43,6 +43,7 @@ enum class Icon {
     Power,
     Link,
     Apps,
+    Install,
 };
 
 /// Maps a file name to the icon that represents it.

@@ -13,16 +13,26 @@
 
 #include "nxf/canvas.hpp"
 #include "nxf/font.hpp"
+#include "nxf/i18n.hpp"
 #include "nxf/icons.hpp"
 #include "nxf/model.hpp"
 
 namespace nxf {
 
-enum class Section { Sd = 0, Internal = 1, Apps = 2, Ftp = 3, Settings = 4, About = 5 };
+enum class Section {
+    Sd = 0,
+    Internal = 1,
+    Apps = 2,
+    Dbi = 3,
+    Ftp = 4,
+    Settings = 5,
+    About = 6,
+};
 enum class ViewMode { List, Grid };
-enum class DialogKind { None, Confirm, Properties, Actions };
+enum class DialogKind { None, Confirm, Properties, Actions, NspConflict };
 
 struct SettingsState {
+    Lang language = Lang::French;
     bool animations = true;
     bool gridDefault = false;
     int ftpPort = 5000;
@@ -76,6 +86,8 @@ struct Platform {
     virtual bool promptText(const std::string& header, const std::string& initial,
                             std::string& out) = 0;
     virtual void settingsChanged(const SettingsState& settings) = 0;
+    /// Writes sdmc:/NXF_Save/pref.json (created on first save).
+    virtual bool savePreferences(const SettingsState& settings) = 0;
 };
 
 struct FtpSnapshot {
@@ -119,6 +131,37 @@ struct TitleApi {
     /// Removes the title, its updates, its DLC, its save data and the leftover
     /// Atmosphère content folders.
     virtual bool remove(std::uint64_t id, TitleRemovalReport& report, std::string& error) = 0;
+};
+
+/// One .nsp found on the SD card.
+struct NspEntry {
+    std::string path;
+    std::string name;
+    std::uint64_t size = 0;
+    std::uint64_t titleId = 0;
+    bool installed = false;
+};
+
+enum class DbiView { Cards = 0, NspList = 1 };
+
+struct DbiState {
+    DbiView view = DbiView::Cards;
+    int card = 0;
+    std::vector<NspEntry> nsps;
+    int cursor = 0;
+    float scroll = 0.0f;
+    float scrollTarget = 0.0f;
+    bool scanned = false;
+    std::string error;
+};
+
+/// First-run language selection.
+struct SetupState {
+    bool active = false;
+    int selected = 1; // Français by default
+    float scroll = 1.0f;
+    float scrollTarget = 1.0f;
+    float appear = 0.0f;
 };
 
 struct AppsState {
@@ -187,16 +230,17 @@ constexpr float kVisibleListHeight = kContentBottom - kContentTop;
 /// Sidebar geometry shared by input handling and rendering.
 namespace nav {
 
-constexpr int kCount = 6;
+constexpr int kCount = 7;
 
 inline float itemY(int index) {
     switch (index) {
         case 0: return 166.0f;
         case 1: return 218.0f;
         case 2: return 304.0f;
-        case 3: return 390.0f;
-        case 4: return 476.0f;
-        case 5: return 528.0f;
+        case 3: return 356.0f;
+        case 4: return 436.0f;
+        case 5: return 522.0f;
+        case 6: return 574.0f;
         default: return 166.0f;
     }
 }
@@ -206,9 +250,10 @@ inline int indexForSection(Section section) {
         case Section::Sd: return 0;
         case Section::Internal: return 1;
         case Section::Apps: return 2;
-        case Section::Ftp: return 3;
-        case Section::Settings: return 4;
-        case Section::About: return 5;
+        case Section::Dbi: return 3;
+        case Section::Ftp: return 4;
+        case Section::Settings: return 5;
+        case Section::About: return 6;
     }
     return 0;
 }
@@ -218,9 +263,10 @@ inline Section sectionFor(int index) {
         case 0: return Section::Sd;
         case 1: return Section::Internal;
         case 2: return Section::Apps;
-        case 3: return Section::Ftp;
-        case 4: return Section::Settings;
-        case 5: return Section::About;
+        case 3: return Section::Dbi;
+        case 4: return Section::Ftp;
+        case 5: return Section::Settings;
+        case 6: return Section::About;
         default: return Section::Sd;
     }
 }
@@ -251,6 +297,16 @@ public:
     void render(Canvas& canvas);
 
     bool quitRequested() const { return quitRequested_; }
+
+    /// Shows the first-run language screen (no pref.json yet).
+    void showLanguageSetup() { setup_.active = true; }
+
+    /// Overrides where .nsp files are searched (used by the host preview).
+    void setNspRoots(std::vector<std::string> roots) {
+        nspRoots_ = std::move(roots);
+        dbi_.scanned = false;
+    }
+    bool setupActive() const { return setup_.active; }
     bool settingsDirty() const { return settingsDirty_; }
     void clearSettingsDirty() { settingsDirty_ = false; }
     const SettingsState& settings() const { return settings_; }
@@ -305,6 +361,12 @@ private:
     void updateFtpScreen(const InputState& input);
     void updateSettingsScreen(const InputState& input);
     void updateApps(const InputState& input);
+    void updateDbi(const InputState& input);
+    void updateSetup(const InputState& input);
+    void scanNspFiles();
+    void requestNspInstall();
+    void confirmNspInstall();
+    void saveLanguage();
     void updateTouch(const InputState& input);
     void handleShortcuts(const InputState& input);
 
@@ -318,6 +380,9 @@ private:
     void renderExplorer(Canvas& canvas, ExplorerState& view, StorageApi& api);
     void renderFtp(Canvas& canvas);
     void renderApps(Canvas& canvas);
+    void renderDbi(Canvas& canvas);
+    void renderSetup(Canvas& canvas);
+    void renderNspDialog(Canvas& canvas, float scale, float opacity);
     void renderSettings(Canvas& canvas);
     void renderAbout(Canvas& canvas);
     void renderFooter(Canvas& canvas);
@@ -367,6 +432,13 @@ private:
     float toastTimer_ = 0.0f;
 
     AppsState apps_;
+    DbiState dbi_;
+    SetupState setup_;
+    int pendingNsp_ = -1;
+    std::uint64_t conflictTitleId_ = 0;
+    int installedCount_ = 0;
+    std::vector<std::string> nspRoots_ {"sdmc:/", "sdmc:/switch", "sdmc:/NXF_Save", "sdmc:/nsp",
+                                       "sdmc:/roms"};
 
     int settingsCursor_ = 0;
     int ftpFocus_ = 0;

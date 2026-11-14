@@ -2,7 +2,7 @@
  * NXF Pro - Nintendo Switch entry point.
  *
  * Owns the framebuffer, the pad/touch input, the software keyboard and the
- * settings file. Everything else (UI, filesystem, FTP) lives in portable code.
+ * NXF_Save/pref.json preferences file.
  *
  * MIT licensed, see LICENSE.
  */
@@ -20,6 +20,7 @@
 
 #include "nxf/app.hpp"
 #include "nxf/font.hpp"
+#include "nxf/i18n.hpp"
 #include "nxf/image.hpp"
 #include "nxf/platform_switch.hpp"
 
@@ -30,8 +31,8 @@
 
 namespace {
 
-constexpr const char* kConfigDir = "sdmc:/switch/NXF Pro";
-constexpr const char* kConfigPath = "sdmc:/switch/NXF Pro/config.ini";
+constexpr const char* kSaveDir = "sdmc:/NXF_Save";
+constexpr const char* kPrefsPath = "sdmc:/NXF_Save/pref.json";
 constexpr float kMoveDelay = 0.36f;
 constexpr float kMoveRepeat = 0.075f;
 constexpr float kStickDeadzone = 0.55f;
@@ -47,6 +48,37 @@ std::string trimmed(const std::string& text) {
         --end;
     }
     return text.substr(begin, end - begin);
+}
+
+/// Minimal JSON reader: finds "key": <string|number|true|false>.
+bool jsonValue(const std::string& json, const std::string& key, std::string& out) {
+    const std::string pattern = "\"" + key + "\"";
+    std::size_t pos = json.find(pattern);
+    if (pos == std::string::npos) {
+        return false;
+    }
+    pos = json.find(':', pos + pattern.size());
+    if (pos == std::string::npos) {
+        return false;
+    }
+    ++pos;
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n')) {
+        ++pos;
+    }
+    if (pos >= json.size()) {
+        return false;
+    }
+    if (json[pos] == '"') {
+        const std::size_t end = json.find('"', pos + 1);
+        if (end == std::string::npos) {
+            return false;
+        }
+        out = json.substr(pos + 1, end - pos - 1);
+        return true;
+    }
+    const std::size_t end = json.find_first_of(",}\n", pos);
+    out = trimmed(json.substr(pos, end - pos));
+    return !out.empty();
 }
 
 class SwitchPlatform final : public nxf::Platform {
@@ -76,7 +108,11 @@ public:
     }
 
     void settingsChanged(const nxf::SettingsState& settings) override {
-        nxf::saveSettings(kConfigPath, settings);
+        nxf::savePrefs(kPrefsPath, settings);
+    }
+
+    bool savePreferences(const nxf::SettingsState& settings) override {
+        return nxf::savePrefs(kPrefsPath, settings);
     }
 };
 
@@ -84,63 +120,69 @@ public:
 
 namespace nxf {
 
-bool loadSettings(const std::string& path, SettingsState& out) {
+bool prefsExist(const std::string& path) {
+    struct stat info {};
+    return stat(path.c_str(), &info) == 0;
+}
+
+bool loadPrefs(const std::string& path, SettingsState& out) {
     std::FILE* file = std::fopen(path.c_str(), "rb");
     if (file == nullptr) {
         return false;
     }
-
-    char line[512];
-    while (std::fgets(line, sizeof(line), file) != nullptr) {
-        const std::string text = trimmed(line);
-        if (text.empty() || text[0] == '#') {
-            continue;
-        }
-        const std::size_t separator = text.find('=');
-        if (separator == std::string::npos) {
-            continue;
-        }
-        const std::string key = trimmed(text.substr(0, separator));
-        const std::string value = trimmed(text.substr(separator + 1));
-
-        if (key == "port") {
-            const int port = std::atoi(value.c_str());
-            if (port > 0 && port < 65536) {
-                out.ftpPort = port;
-            }
-        } else if (key == "user") {
-            if (!value.empty()) {
-                out.ftpUser = value;
-            }
-        } else if (key == "password") {
-            out.ftpPassword = value;
-        } else if (key == "animations") {
-            out.animations = value != "0";
-        } else if (key == "grid") {
-            out.gridDefault = value != "0";
-        }
+    std::string text;
+    char buffer[512];
+    std::size_t read = 0;
+    while ((read = std::fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        text.append(buffer, read);
     }
     std::fclose(file);
+
+    std::string value;
+    if (jsonValue(text, "language", value)) {
+        out.language = langFromCode(trimmed(value));
+    }
+    if (jsonValue(text, "ftpPort", value)) {
+        const int port = std::atoi(value.c_str());
+        if (port > 0 && port < 65536) {
+            out.ftpPort = port;
+        }
+    }
+    if (jsonValue(text, "ftpUser", value) && !value.empty()) {
+        out.ftpUser = value;
+    }
+    if (jsonValue(text, "ftpPassword", value)) {
+        out.ftpPassword = value;
+    }
+    if (jsonValue(text, "animations", value)) {
+        out.animations = value != "false";
+    }
+    if (jsonValue(text, "grid", value)) {
+        out.gridDefault = value == "true";
+    }
     return true;
 }
 
-bool saveSettings(const std::string& path, const SettingsState& settings) {
-    mkdir("sdmc:/switch", 0777);
-    mkdir(kConfigDir, 0777);
+bool savePrefs(const std::string& path, const SettingsState& settings) {
+    mkdir("sdmc:/NXF_Save", 0777);
+    (void)kSaveDir;
 
     std::FILE* file = std::fopen(path.c_str(), "wb");
     if (file == nullptr) {
         return false;
     }
     std::fprintf(file,
-                 "# NXF Pro\n"
-                 "port=%d\n"
-                 "user=%s\n"
-                 "password=%s\n"
-                 "animations=%d\n"
-                 "grid=%d\n",
-                 settings.ftpPort, settings.ftpUser.c_str(), settings.ftpPassword.c_str(),
-                 settings.animations ? 1 : 0, settings.gridDefault ? 1 : 0);
+                 "{\n"
+                 "  \"language\": \"%s\",\n"
+                 "  \"ftpPort\": %d,\n"
+                 "  \"ftpUser\": \"%s\",\n"
+                 "  \"ftpPassword\": \"%s\",\n"
+                 "  \"animations\": %s,\n"
+                 "  \"grid\": %s\n"
+                 "}\n",
+                 langCode(settings.language), settings.ftpPort, settings.ftpUser.c_str(),
+                 settings.ftpPassword.c_str(), settings.animations ? "true" : "false",
+                 settings.gridDefault ? "true" : "false");
     std::fclose(file);
     return true;
 }
@@ -171,7 +213,8 @@ int main(int argc, char** argv) {
     nxf::loadImageFromMemory(logo_bin, logo_bin_size, logo);
 
     nxf::SettingsState settings;
-    nxf::loadSettings(kConfigPath, settings);
+    const bool hasPrefs = nxf::prefsExist(kPrefsPath) && nxf::loadPrefs(kPrefsPath, settings);
+    nxf::setLang(settings.language);
 
     std::unique_ptr<nxf::StorageApi> sd = nxf::openSdStorage();
     std::unique_ptr<nxf::StorageApi> internal = nxf::openInternalStorage();
@@ -186,6 +229,9 @@ int main(int argc, char** argv) {
         app.setLogo(&logo);
     }
     app.setInitialPath(sd->root());
+    if (!hasPrefs) {
+        app.showLanguageSetup();
+    }
 
     Framebuffer framebuffer;
     if (R_FAILED(framebufferCreate(&framebuffer, nwindowGetDefault(), nxf::layout::kScreenWidth,
@@ -283,7 +329,7 @@ int main(int argc, char** argv) {
         input.time += input.dt;
 
         if (app.settingsDirty()) {
-            nxf::saveSettings(kConfigPath, app.settings());
+            nxf::savePrefs(kPrefsPath, app.settings());
             app.clearSettingsDirty();
         }
         if (app.quitRequested()) {

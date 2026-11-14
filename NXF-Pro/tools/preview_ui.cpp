@@ -13,8 +13,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <functional>
 #include <string>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <vector>
 
 #include "nxf/app.hpp"
@@ -186,6 +189,7 @@ struct FakeTitles : nxf::TitleApi {
 struct FakePlatform : nxf::Platform {
     bool promptText(const std::string&, const std::string&, std::string&) override { return false; }
     void settingsChanged(const nxf::SettingsState&) override {}
+    bool savePreferences(const nxf::SettingsState&) override { return true; }
 };
 
 } // namespace
@@ -254,7 +258,24 @@ int main(int argc, char** argv) {
     addTitle(0x0100B0C011200000ull, "RetroArch", "Libretro", "v1.19.0", 0, 0, false);
     addTitle(0x0100DCA0064A6000ull, "Moonlight", "Moonlight Streaming", "v1.1.0", 0, 0, false);
 
+    // Sparse .nsp files so the DBI screen shows realistic sizes.
+    const std::string nspDir = "/tmp/nxf-preview-nsp";
+    mkdir(nspDir.c_str(), 0777);
+    auto makeNsp = [&](const char* name, off_t size) {
+        const std::string path = nspDir + "/" + name;
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        stream << "NSP0";
+        stream.close();
+        truncate(path.c_str(), size);
+    };
+    makeNsp("Mario Kart 8 Deluxe [0100152000022000][v0].nsp", 7ll * 1024 * 1024 * 1024);
+    makeNsp("New Game [0100ABCDEF123000][v0].nsp", 2ll * 1024 * 1024 * 1024);
+    makeNsp("RetroArch [0100B0C011200000][v0].nsp", 380ll * 1024 * 1024);
+    makeNsp("The Legend of Zelda - TotK [0100000000010000][v0].nsp",
+            14ll * 1024 * 1024 * 1024);
+
     nxf::App app(fonts, platform, ftp, sd, internal, titles);
+    app.setNspRoots({nspDir});
     if (logo.valid()) {
         app.setLogo(&logo);
     }
@@ -288,8 +309,15 @@ int main(int argc, char** argv) {
         step(1);
     };
 
+    // First run: language setup.
+    app.showLanguageSetup();
+    step(40);
+    shot("00_setup");
+    press([](nxf::InputState& in) { in.accept = true; });
+    step(60);
+
     // Intro + first listing.
-    step(90);
+    step(60);
     shot("01_sd_list");
 
     // Grid view.
@@ -327,10 +355,27 @@ int main(int argc, char** argv) {
     press([](nxf::InputState& in) { in.back = true; });
     step(10);
 
+    // DBI: cards, NSP list, conflict dialog.
+    press([](nxf::InputState& in) { in.nextSection = true; });
+    step(40);
+    shot("08_dbi_cards");
+    press([](nxf::InputState& in) { in.right = true; });
+    step(15);
+    press([](nxf::InputState& in) { in.accept = true; });
+    step(40);
+    shot("09_dbi_nsp");
+    press([](nxf::InputState& in) { in.accept = true; });
+    step(30);
+    shot("10_dbi_conflict");
+    press([](nxf::InputState& in) { in.back = true; });
+    step(15);
+    press([](nxf::InputState& in) { in.back = true; });
+    step(15);
+
     // FTP stopped.
     press([](nxf::InputState& in) { in.nextSection = true; });
     step(30);
-    shot("08_ftp_stopped");
+    shot("11_ftp_stopped");
 
     // FTP running with a client.
     press([](nxf::InputState& in) { in.accept = true; });
@@ -340,20 +385,20 @@ int main(int argc, char** argv) {
     ftp.log.push_back("PWD /sd/switch");
     ftp.log.push_back("LIST 200 OK");
     step(40);
-    shot("09_ftp_running");
+    shot("12_ftp_running");
 
     // Settings.
     press([](nxf::InputState& in) { in.nextSection = true; });
     step(30);
-    shot("10_settings");
+    shot("13_settings");
 
     // About.
     press([](nxf::InputState& in) { in.nextSection = true; });
     step(30);
-    shot("11_about");
+    shot("14_about");
 
     // Back to SD in list view.
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 6; ++i) {
         press([](nxf::InputState& in) { in.prevSection = true; });
     }
     step(20);
@@ -366,10 +411,10 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 6; ++i) {
         press([](nxf::InputState& in) { in.down = true; });
     }
-    shot("12_actions_delete");
+    shot("15_actions_delete");
     press([](nxf::InputState& in) { in.accept = true; });
     step(20);
-    shot("13_confirm_delete");
+    shot("16_confirm_delete");
 
     // Properties.
     press([](nxf::InputState& in) { in.back = true; });
@@ -381,7 +426,7 @@ int main(int argc, char** argv) {
     }
     press([](nxf::InputState& in) { in.accept = true; });
     step(20);
-    shot("14_properties");
+    shot("17_properties");
 
     std::printf("\nall screens rendered\n");
     return 0;

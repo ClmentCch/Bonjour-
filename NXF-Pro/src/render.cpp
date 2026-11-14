@@ -108,6 +108,7 @@ Icon sectionIcon(Section section) {
         case Section::Internal: return Icon::Memory;
         case Section::Ftp: return Icon::Network;
         case Section::Apps: return Icon::Apps;
+        case Section::Dbi: return Icon::Install;
         case Section::Settings: return Icon::Settings;
         case Section::About: return Icon::Info;
     }
@@ -116,29 +117,31 @@ Icon sectionIcon(Section section) {
 
 const char* sectionLabel(Section section) {
     switch (section) {
-        case Section::Sd: return "Carte SD";
-        case Section::Internal: return "Mémoire interne";
-        case Section::Apps: return "Applications";
-        case Section::Ftp: return "Serveur FTP";
-        case Section::Settings: return "Paramètres";
-        case Section::About: return "À propos";
+        case Section::Sd: return tr(Txt::SubSd);
+        case Section::Internal: return tr(Txt::SubInternal);
+        case Section::Apps: return tr(Txt::SubApps);
+        case Section::Dbi: return tr(Txt::SubDbi);
+        case Section::Ftp: return tr(Txt::SubFtp);
+        case Section::Settings: return tr(Txt::SubSettings);
+        case Section::About: return tr(Txt::SubAbout);
     }
     return "";
 }
 
 struct NavEntry {
-    const char* label;
+    Txt label;
     Icon icon;
     Section section;
 };
 
 const NavEntry kNav[] = {
-    {"Switch SD", Icon::SdCard, Section::Sd},
-    {"Mémoire interne", Icon::Memory, Section::Internal},
-    {"Applications", Icon::Apps, Section::Apps},
-    {"FTP", Icon::Network, Section::Ftp},
-    {"Paramètres", Icon::Settings, Section::Settings},
-    {"À propos", Icon::Info, Section::About},
+    {Txt::NavSd, Icon::SdCard, Section::Sd},
+    {Txt::NavInternal, Icon::Memory, Section::Internal},
+    {Txt::NavApps, Icon::Apps, Section::Apps},
+    {Txt::NavDbi, Icon::Install, Section::Dbi},
+    {Txt::NavFtp, Icon::Network, Section::Ftp},
+    {Txt::NavSettings, Icon::Settings, Section::Settings},
+    {Txt::NavAbout, Icon::Info, Section::About},
 };
 
 void drawPill(Canvas& canvas, const Rect& rect, const std::string& label, Color dot,
@@ -216,6 +219,11 @@ void App::render(Canvas& canvas) {
 
     canvas.clear(theme::kBackground);
 
+    if (setup_.active) {
+        renderSetup(canvas);
+        return;
+    }
+
     const float introFade = easeOutCubic(intro_);
     renderSidebar(canvas);
     renderHeader(canvas);
@@ -231,6 +239,9 @@ void App::render(Canvas& canvas) {
             break;
         case Section::Apps:
             renderApps(canvas);
+            break;
+        case Section::Dbi:
+            renderDbi(canvas);
             break;
         case Section::Ftp:
             renderFtp(canvas);
@@ -309,8 +320,8 @@ void App::renderSidebar(Canvas& canvas) {
     group.spacing = 1.6f;
     drawText(canvas, 32.0f, 142.0f, "STOCKAGE", group);
     drawText(canvas, 32.0f, 280.0f, "CONSOLE", group);
-    drawText(canvas, 32.0f, 366.0f, "RÉSEAU", group);
-    drawText(canvas, 32.0f, 452.0f, "APPLICATION", group);
+    drawText(canvas, 32.0f, 412.0f, "RÉSEAU", group);
+    drawText(canvas, 32.0f, 498.0f, "APPLICATION", group);
 
     // Sliding active indicator
     const float targetY = nav::itemY(nav::indexForSection(section_)) + 12.0f;
@@ -343,7 +354,7 @@ void App::renderSidebar(Canvas& canvas) {
         params.weight = active ? Weight::Medium : Weight::Regular;
         params.size = 14.0f;
         params.color = active ? theme::kText : theme::kTextSecondary;
-        drawTextVCentered(canvas, item.x + 46.0f, y + kSidebarItemH * 0.5f, entry.label, params);
+        drawTextVCentered(canvas, item.x + 46.0f, y + kSidebarItemH * 0.5f, tr(entry.label), params);
 
         if (active) {
             canvas.fillCircle(item.right() - 18.0f, y + kSidebarItemH * 0.5f, 2.5f,
@@ -897,6 +908,301 @@ void App::renderApps(Canvas& canvas) {
     canvas.popClip();
 }
 
+void App::renderDbi(Canvas& canvas) {
+    if (dbi_.view == DbiView::NspList) {
+        TextParams column;
+        column.weight = Weight::Medium;
+        column.size = 10.0f;
+        column.color = hex(0x82828F);
+        column.spacing = 1.4f;
+        drawText(canvas, kContentX + 16.0f, kListHeaderY, tr(Txt::NspFiles), column);
+        char counter[64];
+        std::snprintf(counter, sizeof(counter), "%d %s", static_cast<int>(dbi_.nsps.size()),
+                      tr(Txt::Items));
+        drawTextRight(canvas, kContentRight, kListHeaderY + 7.0f, counter, column);
+
+        if (dbi_.nsps.empty()) {
+            drawIcon(canvas, Icon::Install,
+                     Rect{kContentX + kContentW * 0.5f - 22.0f, kContentTop + 96.0f, 44.0f, 44.0f},
+                     theme::kTextMuted, 0.8f);
+            TextParams title;
+            title.weight = Weight::Medium;
+            title.size = 16.0f;
+            title.opacity = 0.9f;
+            drawTextCentered(canvas, kContentX + kContentW * 0.5f, kContentTop + 168.0f,
+                             tr(Txt::NoNspFound), title);
+            return;
+        }
+
+        canvas.pushClip(
+            Rect{kContentX - 8.0f, kContentTop, kContentW + 16.0f, kContentBottom - kContentTop});
+        const int count = static_cast<int>(dbi_.nsps.size());
+        for (int i = 0; i < count; ++i) {
+            const float y = kContentTop + static_cast<float>(i) * 64.0f - dbi_.scroll;
+            if (y > kContentBottom) {
+                break;
+            }
+            if (y + 56.0f < kContentTop - 64.0f) {
+                continue;
+            }
+
+            const NspEntry& nsp = dbi_.nsps[static_cast<std::size_t>(i)];
+            const bool selected = i == dbi_.cursor;
+            const Rect row{kContentX, y, kContentW, 56.0f};
+            if (selected) {
+                canvas.fillRoundRect(row, 14.0f, theme::kPanelActive);
+                canvas.strokeRoundRect(row, 14.0f, theme::kBorderStrong, 1.0f);
+                canvas.fillRoundRect(Rect{row.x + 1.0f, y + 16.0f, 3.0f, 24.0f}, 1.5f,
+                                     rainbow(time_ * 0.25f));
+            }
+
+            TextParams name;
+            name.weight = selected ? Weight::Medium : Weight::Regular;
+            name.size = 13.0f;
+            name.color = selected ? theme::kText : hex(0xE8E8F0);
+            drawText(canvas, row.x + 18.0f, y + 10.0f,
+                     gFonts->ellipsize(TextStyle{name.weight, name.size}, nsp.name, kContentW - 320.0f),
+                     name);
+
+            char details[160];
+            if (nsp.titleId != 0) {
+                std::snprintf(details, sizeof(details), "%s · %016llX", formatSize(nsp.size).c_str(),
+                              static_cast<unsigned long long>(nsp.titleId));
+            } else {
+                std::snprintf(details, sizeof(details), "%s", formatSize(nsp.size).c_str());
+            }
+            TextParams meta;
+            meta.weight = Weight::Light;
+            meta.size = 11.0f;
+            meta.color = theme::kTextMuted;
+            drawText(canvas, row.x + 18.0f, y + 32.0f, details, meta);
+
+            TextParams badge;
+            badge.weight = Weight::Medium;
+            badge.size = 10.0f;
+            badge.color = nsp.installed ? hex(0x7EE0A0) : theme::kTextMuted;
+            const std::string label = nsp.installed ? tr(Txt::Installed) : tr(Txt::NotInstalled);
+            const float badgeWidth = measureText(label, badge) + 24.0f;
+            const Rect pill{kContentRight - 16.0f - badgeWidth, y + 16.0f, badgeWidth, 24.0f};
+            canvas.fillRoundRect(pill, 12.0f,
+                                 withAlpha(nsp.installed ? hex(0x16281E) : hex(0x17171C), 1.0f));
+            drawTextCentered(canvas, pill.x + pill.w * 0.5f, pill.y + pill.h * 0.5f, label, badge);
+        }
+        canvas.popClip();
+        return;
+    }
+
+    const float cardW = (kContentW - 16.0f) * 0.5f;
+    const float cardH = 170.0f;
+    std::uint64_t total = 0;
+    std::uint64_t freeBytes = 0;
+    sd_.space(total, freeBytes);
+
+    for (int i = 0; i < 4; ++i) {
+        const int column = i % 2;
+        const int row = i / 2;
+        const Rect card{kContentX + static_cast<float>(column) * (cardW + 16.0f),
+                        kContentTop + static_cast<float>(row) * (cardH + 16.0f), cardW, cardH};
+        const bool focused = i == dbi_.card;
+
+        canvas.fillRoundRect(card, 18.0f, focused ? theme::kPanelActive : hex(0x0E0E12));
+        canvas.strokeRoundRect(card, 18.0f,
+                               withAlpha(focused ? theme::kBorderStrong : theme::kBorder, 1.0f), 1.0f);
+        if (focused) {
+            canvas.fillRoundRect(Rect{card.x + 1.0f, card.y + 22.0f, 3.0f, card.h - 44.0f}, 1.5f,
+                                 rainbow(time_ * 0.25f));
+        }
+
+        Icon icon = Icon::Install;
+        std::string title;
+        std::string detail;
+        switch (i) {
+            case 0:
+                icon = Icon::Network;
+                title = ftpState_.running ? tr(Txt::StopFtp) : tr(Txt::StartFtp);
+                if (ftpState_.running) {
+                    detail = "ftp://" + ftpState_.address;
+                } else {
+                    detail = "Port " + std::to_string(settings_.ftpPort) + " · " +
+                             settings_.ftpUser;
+                }
+                break;
+            case 1:
+                icon = Icon::Install;
+                title = tr(Txt::InstallNsp);
+                detail = std::string(tr(Txt::NspFiles)) + " · " +
+                         std::to_string(static_cast<int>(dbi_.nsps.size()));
+                break;
+            case 2:
+                icon = Icon::Apps;
+                title = tr(Txt::InstalledContent);
+                detail = std::to_string(installedCount_) + " " + tr(Txt::Items);
+                break;
+            default:
+                icon = Icon::Memory;
+                title = tr(Txt::Storage);
+                detail = formatSize(freeBytes) + " / " + formatSize(total);
+                break;
+        }
+
+        drawIcon(canvas, icon, Rect{card.x + 26.0f, card.y + 24.0f, 26.0f, 26.0f},
+                 focused ? theme::kText : theme::kTextSecondary, 0.9f);
+        if (i == 0 && ftpState_.running) {
+            canvas.fillCircle(card.right() - 30.0f, card.y + 37.0f, 5.0f, hex(0x4ED98A));
+        }
+
+        TextParams heading;
+        heading.weight = Weight::Medium;
+        heading.size = 16.0f;
+        heading.opacity = 0.96f;
+        drawText(canvas, card.x + 26.0f, card.y + 68.0f, title, heading);
+
+        TextParams info;
+        info.weight = Weight::Light;
+        info.size = 12.0f;
+        info.color = theme::kTextMuted;
+        const std::vector<std::string> lines = wrapText(detail, info, card.w - 52.0f);
+        float lineY = card.y + 100.0f;
+        for (const std::string& line : lines) {
+            drawText(canvas, card.x + 26.0f, lineY, line, info);
+            lineY += 18.0f;
+        }
+    }
+}
+
+void App::renderSetup(Canvas& canvas) {
+    const float fade = easeOutCubic(std::min(1.0f, setup_.appear));
+    const float cx = layout::kScreenWidth * 0.5f;
+
+    if (logo_ != nullptr && logo_->valid()) {
+        const float size = 108.0f;
+        canvas.drawImageRounded(*logo_, Rect{cx - size * 0.5f, 58.0f, size, size}, 26.0f, fade);
+    }
+
+    TextParams title;
+    title.weight = Weight::Light;
+    title.size = 54.0f;
+    const std::string word = "NXF Pro";
+    const float width = measureText(word, title);
+    const int columnsCount = static_cast<int>(std::ceil(width)) + 6;
+    std::vector<Color> columns(static_cast<std::size_t>(columnsCount));
+    for (int i = 0; i < columnsCount; ++i) {
+        const float u = static_cast<float>(i) / static_cast<float>(columnsCount);
+        columns[static_cast<std::size_t>(i)] = rainbow(u * 1.15f - time_ * 0.22f);
+    }
+    TextStyle style;
+    style.weight = Weight::Light;
+    style.size = 54.0f;
+    const float titleX = cx - width * 0.5f;
+    gFonts->drawGradient(canvas, style, titleX, 202.0f, word, columns,
+                         static_cast<int>(titleX));
+
+    TextParams sub;
+    sub.weight = Weight::Light;
+    sub.size = 16.0f;
+    sub.color = theme::kTextSecondary;
+    drawTextCentered(canvas, cx, 296.0f, "Choose your language :", sub);
+
+    const Rect frame{cx - 230.0f, 334.0f, 460.0f, 158.0f};
+    canvas.fillRoundRect(frame, 20.0f, hex(0x0E0E12));
+    canvas.strokeRoundRect(frame, 20.0f, theme::kBorder, 1.0f);
+
+    canvas.pushClip(Rect{frame.x + 2.0f, frame.y + 2.0f, frame.w - 4.0f, frame.h - 4.0f});
+    for (int i = 0; i < kLangCount; ++i) {
+        const float y = frame.y + frame.h * 0.5f + (static_cast<float>(i) - setup_.scroll) * 46.0f;
+        if (y < frame.y - 30.0f || y > frame.bottom() + 30.0f) {
+            continue;
+        }
+        const bool selected = i == setup_.selected;
+        TextParams item;
+        item.weight = selected ? Weight::Medium : Weight::Light;
+        item.size = selected ? 19.0f : 15.0f;
+        item.color = selected ? theme::kText : theme::kTextMuted;
+        drawTextCentered(canvas, cx, y, langInfo(i).native, item);
+    }
+    canvas.popClip();
+
+    const Rect marker{cx - 190.0f, frame.y + frame.h * 0.5f - 22.0f, 380.0f, 44.0f};
+    canvas.strokeRoundRect(marker, 12.0f, withAlpha(theme::kAccent, 0.3f), 1.0f);
+
+    const Rect save{cx - 120.0f, 526.0f, 240.0f, 48.0f};
+    drawButton(canvas, save, tr(Txt::SaveLanguage), true, true, fade);
+
+    TextParams note;
+    note.weight = Weight::Light;
+    note.size = 11.0f;
+    note.color = theme::kTextMuted;
+    drawTextCentered(canvas, cx, 600.0f, tr(Txt::LanguageNote), note);
+
+    if (fade < 1.0f) {
+        canvas.dim(1.0f - fade);
+    }
+}
+
+void App::renderNspDialog(Canvas& canvas, float scale, float opacity) {
+    const Rect panel{kContentX + (kContentW - 560.0f) * 0.5f,
+                     kContentTop + 60.0f - (1.0f - scale) * 22.0f, 560.0f, 330.0f};
+    canvas.dropShadow(panel, 18.0f, 26.0f, 0.7f * opacity);
+    canvas.fillRoundRect(panel, 18.0f, withAlpha(hex(0x131319), opacity));
+    canvas.strokeRoundRect(panel, 18.0f, withAlpha(theme::kBorderStrong, opacity), 1.0f);
+
+    drawIcon(canvas, Icon::Warning, Rect{panel.x + 28.0f, panel.y + 26.0f, 22.0f, 22.0f},
+             theme::kDanger, opacity);
+
+    TextParams title;
+    title.weight = Weight::Medium;
+    title.size = 17.0f;
+    title.opacity = opacity;
+    const std::vector<std::string> titleLines =
+        wrapText(dialogTitle_, title, panel.w - 96.0f);
+    float titleY = panel.y + 24.0f;
+    for (const std::string& line : titleLines) {
+        drawText(canvas, panel.x + 62.0f, titleY, line, title);
+        titleY += 24.0f;
+    }
+
+    const TitleEntry* entry = nullptr;
+    for (const TitleEntry& candidate : apps_.entries) {
+        if (candidate.id == conflictTitleId_) {
+            entry = &candidate;
+            break;
+        }
+    }
+    const std::string name = entry != nullptr ? entry->name : std::string("Application");
+
+    const Rect iconBox{panel.x + 28.0f, panel.y + 110.0f, 64.0f, 64.0f};
+    const Image* icon = entry != nullptr ? titleIcon(*entry) : nullptr;
+    if (icon != nullptr) {
+        canvas.drawImageRounded(*icon, iconBox, 14.0f, opacity);
+    } else {
+        canvas.fillRoundRect(iconBox, 14.0f, withAlpha(hex(0x1D1D24), opacity));
+        drawIcon(canvas, Icon::Apps, Rect{iconBox.x + 18.0f, iconBox.y + 18.0f, 28.0f, 28.0f},
+                 theme::kTextMuted, opacity);
+    }
+
+    TextParams appName;
+    appName.weight = Weight::Medium;
+    appName.size = 15.0f;
+    appName.opacity = opacity;
+    drawText(canvas, iconBox.right() + 18.0f, iconBox.y + 8.0f,
+             gFonts->ellipsize(TextStyle{Weight::Medium, 15.0f}, name, panel.w - 160.0f), appName);
+
+    char idText[32];
+    std::snprintf(idText, sizeof(idText), "%016llX",
+                  static_cast<unsigned long long>(conflictTitleId_));
+    TextParams appId;
+    appId.weight = Weight::Light;
+    appId.size = 11.0f;
+    appId.color = theme::kTextMuted;
+    appId.opacity = opacity;
+    drawText(canvas, iconBox.right() + 18.0f, iconBox.y + 34.0f, idText, appId);
+
+    const Rect no{panel.x + panel.w - 300.0f, panel.bottom() - 70.0f, 128.0f, 46.0f};
+    const Rect yes{panel.x + panel.w - 156.0f, panel.bottom() - 70.0f, 128.0f, 46.0f};
+    drawButton(canvas, no, tr(Txt::No), false, dialogFocus_ == 0, opacity);
+    drawButton(canvas, yes, tr(Txt::Yes), true, dialogFocus_ == 1, opacity, true);
+}
+
 void App::renderSettings(Canvas& canvas) {
     struct Row {
         const char* label;
@@ -990,7 +1296,7 @@ void App::renderAbout(Canvas& canvas) {
     version.weight = Weight::Light;
     version.size = 13.0f;
     version.color = theme::kTextSecondary;
-    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 1.1.0  ·  homebrew pour Nintendo Switch",
+    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 1.2.0  ·  homebrew pour Nintendo Switch",
              version);
 
     TextParams body;
@@ -1066,6 +1372,11 @@ void App::renderFooter(Canvas& canvas) {
             break;
         case Section::Apps:
             hints = "A Supprimer définitivement    ↑↓ Navigation    ZL/ZR Sections    + Quitter";
+            break;
+        case Section::Dbi:
+            hints = dbi_.view == DbiView::NspList
+                        ? "A Installer    B Retour    ZL/ZR Sections    + Quitter"
+                        : "A Ouvrir    ZL/ZR Sections    + Quitter";
             break;
         case Section::Ftp:
             hints = "A Démarrer / Arrêter    ZL/ZR Sections    + Quitter";
@@ -1147,6 +1458,11 @@ void App::renderDialog(Canvas& canvas) {
                               dialogActions_[static_cast<std::size_t>(i)], label);
             y += 44.0f;
         }
+        return;
+    }
+
+    if (dialog_ == DialogKind::NspConflict) {
+        renderNspDialog(canvas, scale, opacity);
         return;
     }
 

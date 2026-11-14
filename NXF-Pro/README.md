@@ -2,8 +2,9 @@
 
 Gestionnaire de fichiers natif pour Nintendo Switch, avec un **véritable serveur FTP**
 intégré : pilotez la carte SD et la mémoire interne de la console depuis un PC,
-un Mac, un téléphone ou un autre appareil du même réseau, et supprimez
-complètement les jeux installés.
+un Mac, un téléphone ou un autre appareil du même réseau, supprimez
+complètement les jeux installés, et retrouvez un menu **DBI** pour le FTP et les
+fichiers NSP.
 
 Interface noire premium, typographie Montserrat, dégradés animés et animations
 fluides — sans jamais sacrifier la réactivité sur la console.
@@ -14,6 +15,8 @@ fluides — sans jamais sacrifier la réactivité sur la console.
 
 - [Fonctionnalités](#fonctionnalités)
 - [Applications installées](#applications-installées)
+- [Première configuration](#première-configuration)
+- [DBI](#dbi)
 - [Installation](#installation)
 - [Serveur FTP](#serveur-ftp)
 - [Raccourcis](#raccourcis)
@@ -98,14 +101,73 @@ jour immédiatement.
 > en **mode application** (titre complet), comme toutes les opérations sur les
 > titres installés.
 
+## Première configuration
+
+Au tout premier lancement, NXF Pro affiche un écran de configuration : le logo,
+le titre « NXF Pro » en dégradé animé, le texte *Choose your language :* et une
+liste défilante de douze langues (English, Français, Español, Deutsch, Italiano,
+Português, Nederlands, Polski, Russian, Japanese, Korean, Chinese).
+
+![Première configuration](docs/premiere-configuration.png)
+
+Le bouton **Enregistrer** crée le dossier `sdmc:/NXF_Save` et y écrit
+`pref.json` :
+
+```json
+{
+  "language": "fr",
+  "ftpPort": 5000,
+  "ftpUser": "switch",
+  "ftpPassword": "nxfpro",
+  "animations": true,
+  "grid": false
+}
+```
+
+À chaque lancement, le fichier est lu : s'il existe, l'application démarre
+directement dans la langue enregistrée ; sinon l'écran de configuration
+réapparaît. L'interface est traduite en **français et en anglais** ; les autres
+langues sont conservées dans `pref.json` et utilisent l'anglais en attendant
+leurs traductions.
+
+## DBI
+
+Le menu **DBI** regroupe les outils de transfert et d'installation dans quatre
+cartes :
+
+![DBI](docs/dbi.png)
+
+- **Démarrer le serveur FTP** — démarre le serveur intégré sans quitter la page
+  (adresse, port et point vert d'activité affichés).
+- **Installer un NSP** — liste les fichiers `.nsp` trouvés sur la carte SD
+  (`/`, `/switch`, `/NXF_Save`, `/nsp`, `/roms`), avec leur taille, leur
+  identifiant de titre et un badge **Installé** quand le jeu est déjà présent.
+- **Contenu installé** — accès direct à la liste des applications.
+- **Stockage** — espace libre et capacité totale de la carte SD.
+
+![Fichiers NSP](docs/dbi-nsp.png)
+
+Quand un `.nsp` correspond à un jeu déjà installé, NXF Pro demande
+**« Supprimer le contenu de cette app ? »** en affichant l'icône et le nom du
+jeu, avec deux boutons **Oui** et **Non**. « Non » annule et affiche
+*Installation annulé car contenu non supprimé.*
+
+![Conflit NSP](docs/nsp-conflit.png)
+
+> **Important** : cette version ne contient pas le moteur d'écriture NCM/NSP
+> (analyse du CNMT et écriture des NCA), qui exige les clés de la console.
+> L'écriture d'un NSP n'est donc pas encore possible : NXF Pro refuse
+> l'opération **sans jamais supprimer le contenu existant**, pour ne pas laisser
+> un jeu effacé sans remplaçant. La détection, le dialogue et la suppression de
+> contenu, eux, sont réels.
+
 ## Installation
 
 1. Téléchargez `NXF-Pro.nro` (dernière version du dépôt ou release).
 2. Copiez-le sur la carte SD dans `switch/`.
 3. Lancez-le depuis le menu homebrew (Atmosphère).
 
-Le fichier de configuration est créé automatiquement dans
-`sdmc:/switch/NXF Pro/config.ini`.
+Les préférences sont créées automatiquement dans `sdmc:/NXF_Save/pref.json`.
 
 > Aucun NSP n'est fourni : sa génération exige les clés privées de la console.
 
@@ -198,14 +260,17 @@ STOR, MKD, RMD, DELE, renommage, authentification et confinement des chemins.
 
 ## Configuration
 
-`sdmc:/switch/NXF Pro/config.ini`
+`sdmc:/NXF_Save/pref.json`
 
-```ini
-port=5000
-user=switch
-password=nxfpro
-animations=1
-grid=0
+```json
+{
+  "language": "fr",
+  "ftpPort": 5000,
+  "ftpUser": "switch",
+  "ftpPassword": "nxfpro",
+  "animations": true,
+  "grid": false
+}
 ```
 
 ## Limites connues

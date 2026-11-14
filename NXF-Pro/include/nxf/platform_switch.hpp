@@ -21,8 +21,9 @@ std::unique_ptr<FtpController> createFtpServer(StorageApi& sd, StorageApi& inter
 /// Installed applications, listed and removed through the console's ns service.
 std::unique_ptr<TitleApi> createTitleApi();
 
-/// Settings persistence (sdmc:/switch/NXF Pro/config.ini).
-bool loadSettings(const std::string& path, SettingsState& out);
-bool saveSettings(const std::string& path, const SettingsState& settings);
+/// Preferences persistence (sdmc:/NXF_Save/pref.json).
+bool prefsExist(const std::string& path);
+bool loadPrefs(const std::string& path, SettingsState& out);
+bool savePrefs(const std::string& path, const SettingsState& settings);
 
 } // namespace nxf
