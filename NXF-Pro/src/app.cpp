@@ -925,6 +925,24 @@ void App::updateSettingsScreen(const InputState& input) {
 
 void App::updateDialog(const InputState& input) {
     if (dialog_ == DialogKind::NspConflict) {
+        if (input.touchPressed) {
+            const float panelX = kContentX + (kContentW - 560.0f) * 0.5f;
+            const float bottom = kContentTop + 60.0f + 330.0f;
+            const auto inside = [&](float x, float w) {
+                return input.touchX >= x && input.touchX <= x + w && input.touchY >= bottom - 70.0f &&
+                       input.touchY <= bottom - 24.0f;
+            };
+            if (inside(panelX + 560.0f - 156.0f, 128.0f)) {
+                dialogFocus_ = 1;
+                confirmNspInstall();
+                return;
+            }
+            if (inside(panelX + 560.0f - 300.0f, 128.0f)) {
+                closeDialog();
+                showToast(tr(Txt::CancelNoRemove));
+                return;
+            }
+        }
         if (input.left || input.right || input.up || input.down) {
             dialogFocus_ = dialogFocus_ == 0 ? 1 : 0;
         }
@@ -993,6 +1011,41 @@ void App::updateTouch(const InputState& input) {
     hoveredNav_ = nav;
     if (nav >= 0) {
         switchSection(nav::sectionFor(nav));
+        return;
+    }
+
+    if (section_ == Section::Dbi) {
+        if (dbi_.view == DbiView::Cards) {
+            const float cardW = (kContentW - 16.0f) * 0.5f;
+            const float cardH = 170.0f;
+            for (int i = 0; i < 4; ++i) {
+                const float x = kContentX + static_cast<float>(i % 2) * (cardW + 16.0f);
+                const float y = kContentTop + static_cast<float>(i / 2) * (cardH + 16.0f);
+                if (input.touchX >= x && input.touchX <= x + cardW && input.touchY >= y &&
+                    input.touchY <= y + cardH) {
+                    dbi_.card = i;
+                    InputState tap;
+                    tap.accept = true;
+                    updateDbi(tap);
+                    return;
+                }
+            }
+            return;
+        }
+        if (input.touchX >= kContentX && input.touchX <= kContentRight &&
+            input.touchY >= kContentTop && input.touchY <= kContentBottom) {
+            const float row = (input.touchY - kContentTop + dbi_.scroll) / 64.0f;
+            const int index = static_cast<int>(row);
+            if (index >= 0 && index < static_cast<int>(dbi_.nsps.size())) {
+                const bool activate = index == dbi_.cursor;
+                dbi_.cursor = index;
+                if (activate) {
+                    InputState tap;
+                    tap.accept = true;
+                    updateDbi(tap);
+                }
+            }
+        }
         return;
     }
 
@@ -1120,6 +1173,27 @@ void App::updateSetup(const InputState& input) {
         setup_.selected = (setup_.selected + 1) % kLangCount;
     }
     setup_.scrollTarget = static_cast<float>(setup_.selected);
+
+    if (input.touchPressed) {
+        const auto inside = [&](float x, float y, float w, float h) {
+            return input.touchX >= x && input.touchX <= x + w && input.touchY >= y &&
+                   input.touchY <= y + h;
+        };
+        const float cx = static_cast<float>(layout::kScreenWidth) * 0.5f;
+        if (inside(cx - 120.0f, 526.0f, 240.0f, 48.0f)) {
+            saveLanguage();
+            return;
+        }
+        if (inside(cx - 230.0f, 334.0f, 460.0f, 158.0f)) {
+            const float relative = (input.touchY - (334.0f + 79.0f)) / 46.0f + setup_.scrollTarget;
+            const int index = static_cast<int>(relative + (relative >= 0.0f ? 0.5f : -0.5f));
+            if (index >= 0 && index < kLangCount) {
+                setup_.selected = index;
+                setup_.scrollTarget = static_cast<float>(index);
+            }
+        }
+    }
+
     setup_.scroll = approach(setup_.scroll, setup_.scrollTarget, 14.0f, dt);
 
     if (input.accept) {

@@ -37,6 +37,21 @@ constexpr float kMoveDelay = 0.36f;
 constexpr float kMoveRepeat = 0.075f;
 constexpr float kStickDeadzone = 0.55f;
 
+/// Append-only diagnostic log, useful when a console misbehaves.
+void debugLog(const std::string& message) {
+    static std::FILE* file = nullptr;
+    static bool opened = false;
+    if (!opened) {
+        opened = true;
+        mkdir("sdmc:/NXF_Save", 0777);
+        file = std::fopen("sdmc:/NXF_Save/debug.log", "wb");
+    }
+    if (file != nullptr) {
+        std::fprintf(file, "%s\n", message.c_str());
+        std::fflush(file);
+    }
+}
+
 std::string trimmed(const std::string& text) {
     std::size_t begin = 0;
     std::size_t end = text.size();
@@ -202,7 +217,12 @@ int main(int argc, char** argv) {
 
     socketInitializeDefault();
     nifmInitialize(NifmServiceType_User);
+
+    // libnx v4 requires the supported styles to be declared before any
+    // PadState is created, otherwise padUpdate() reports nothing.
+    hidInitialize();
     hidInitializeTouchScreen();
+    debugLog("hid initialized");
 
     nxf::FontSet fonts;
     fonts.load(nxf::Weight::Light, font_light_bin, font_light_bin_size);
@@ -243,20 +263,44 @@ int main(int argc, char** argv) {
     }
     framebufferMakeLinear(&framebuffer);
 
+    padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     PadState pad;
     padInitializeDefault(&pad);
+    debugLog("pad ready");
 
     nxf::InputState input;
     input.dt = 1.0f / 60.0f;
 
     int lastDirection = -1;
     float repeatTimer = 0.0f;
+    u64 previousButtons = 0;
+    u64 loggedButtons = 0;
+    int loggedPulses = 0;
+    bool loggedFirstFrame = false;
+    bool touchWasDown = false;
 
     while (appletMainLoop()) {
         padUpdate(&pad);
-        const u64 pressed = padGetButtonsDown(&pad);
         const u64 held = padGetButtons(&pad);
+        const u64 pressed = held & ~previousButtons;
+        previousButtons = held;
         const HidAnalogStickState stick = padGetStickPos(&pad, 0);
+
+        if (!loggedFirstFrame) {
+            loggedFirstFrame = true;
+            char line[96];
+            std::snprintf(line, sizeof(line), "first frame: held=0x%llX",
+                          static_cast<unsigned long long>(held));
+            debugLog(line);
+        }
+        if (held != loggedButtons && loggedPulses < 40) {
+            loggedButtons = held;
+            ++loggedPulses;
+            char line[64];
+            std::snprintf(line, sizeof(line), "input 0x%llX",
+                          static_cast<unsigned long long>(held));
+            debugLog(line);
+        }
 
         int direction = -1;
         if (held & HidNpadButton_Up) {
@@ -311,9 +355,10 @@ int main(int argc, char** argv) {
         input.quit = (pressed & HidNpadButton_Plus) != 0;
 
         HidTouchScreenState touches {};
-        input.touchPressed = false;
-        if (hidGetTouchScreenStates(&touches, 1) > 0 && touches.count > 0) {
-            input.touchPressed = true;
+        const bool touchDown = hidGetTouchScreenStates(&touches, 1) > 0 && touches.count > 0;
+        input.touchPressed = touchDown && !touchWasDown;
+        touchWasDown = touchDown;
+        if (touchDown) {
             input.touchX = static_cast<float>(touches.touches[0].x);
             input.touchY = static_cast<float>(touches.touches[0].y);
         }

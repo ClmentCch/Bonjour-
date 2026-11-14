@@ -1296,7 +1296,7 @@ void App::renderAbout(Canvas& canvas) {
     version.weight = Weight::Light;
     version.size = 13.0f;
     version.color = theme::kTextSecondary;
-    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 1.2.0  ·  homebrew pour Nintendo Switch",
+    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 1.2.1  ·  homebrew pour Nintendo Switch",
              version);
 
     TextParams body;
