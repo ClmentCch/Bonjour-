@@ -1064,7 +1064,8 @@ void App::renderDbi(Canvas& canvas) {
             case 1:
                 icon = Icon::Install;
                 title = tr(Txt::InstallNsp);
-                detail = std::string(tr(Txt::NspFiles)) + " · " +
+                detail = (keysPresent_ ? "clés OK · " : "prod.keys absent · ") +
+                         std::string(tr(Txt::NspFiles)) + " · " +
                          std::to_string(static_cast<int>(dbi_.nsps.size()));
                 break;
             case 2:
@@ -1492,7 +1493,7 @@ void App::renderAbout(Canvas& canvas) {
     version.weight = Weight::Light;
     version.size = 13.0f;
     version.color = theme::kTextSecondary;
-    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 1.2.1  ·  homebrew pour Nintendo Switch",
+    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 3.0.0  ·  homebrew pour Nintendo Switch",
              version);
 
     TextParams body;

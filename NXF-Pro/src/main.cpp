@@ -189,6 +189,9 @@ bool loadPrefs(const std::string& path, SettingsState& out) {
     if (jsonValue(text, "grid", value)) {
         out.gridDefault = value == "true";
     }
+    if (jsonValue(text, "autoHekate", value)) {
+        out.autoHekate = value == "true";
+    }
     return true;
 }
 
@@ -207,11 +210,12 @@ bool savePrefs(const std::string& path, const SettingsState& settings) {
                  "  \"ftpUser\": \"%s\",\n"
                  "  \"ftpPassword\": \"%s\",\n"
                  "  \"animations\": %s,\n"
-                 "  \"grid\": %s\n"
+                 "  \"grid\": %s,\n"
+                 "  \"autoHekate\": %s\n"
                  "}\n",
                  langCode(settings.language), settings.ftpPort, settings.ftpUser.c_str(),
                  settings.ftpPassword.c_str(), settings.animations ? "true" : "false",
-                 settings.gridDefault ? "true" : "false");
+                 settings.gridDefault ? "true" : "false", settings.autoHekate ? "true" : "false");
     std::fclose(file);
     return true;
 }

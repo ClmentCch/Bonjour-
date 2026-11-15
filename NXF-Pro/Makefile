@@ -25,7 +25,7 @@ INCLUDES    :=  include vendor
 
 APP_TITLE   :=  NXF Pro
 APP_AUTHOR  :=  ClmentCch
-APP_VERSION :=  1.2.1
+APP_VERSION :=  3.0.0
 ICON        :=  assets/icon.jpg
 
 #---------------------------------------------------------------------------------

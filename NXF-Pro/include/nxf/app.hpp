@@ -40,6 +40,7 @@ struct SettingsState {
     int ftpPort = 5000;
     std::string ftpUser = "switch";
     std::string ftpPassword = "nxfpro";
+    bool autoHekate = false;
 };
 
 struct InputState {
@@ -348,7 +349,10 @@ public:
     bool settingsDirty() const { return settingsDirty_; }
     void clearSettingsDirty() { settingsDirty_ = false; }
     const SettingsState& settings() const { return settings_; }
-    void applySettings(const SettingsState& settings) { settings_ = settings; }
+    void applySettings(const SettingsState& settings) {
+        settings_ = settings;
+        modes_.autoHekate = settings.autoHekate;
+    }
 
     /// Applies the saved default listing mode to both storages.
     void setDefaultView(ViewMode mode) {
@@ -481,6 +485,7 @@ private:
     DbiState dbi_;
     CopyState copy_;
     ModesState modes_;
+    bool keysPresent_ = false;
     SetupState setup_;
     int pendingNsp_ = -1;
     std::uint64_t conflictTitleId_ = 0;

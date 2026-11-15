@@ -1256,6 +1256,10 @@ void App::scanNspFiles() {
     }
     installedCount_ = static_cast<int>(installed.size());
 
+    struct stat keys {};
+    keysPresent_ = stat("sdmc:/switch/prod.keys", &keys) == 0 ||
+                   stat("sdmc:/NXF_Save/prod.keys", &keys) == 0;
+
     for (const std::string& base : nspRoots_) {
         DIR* dir = opendir(base.c_str());
         if (dir == nullptr) {
@@ -1615,8 +1619,14 @@ void App::updateModes(const InputState& input) {
             } else if (modes_.autorcmOn) {
                 showToast(loc("Désactivez AutoRCM d'abord", "Turn AutoRCM off first"));
             } else {
-                showToast(loc("AutoHekate demande un chargeur d'amorçage modifié : non pris en charge",
-                              "AutoHekate needs a modified bootloader: not supported"));
+                modes_.autoHekate = !modes_.autoHekate;
+                settings_.autoHekate = modes_.autoHekate;
+                settingsDirty_ = true;
+                showToast(modes_.autoHekate
+                              ? loc("AutoHekate activé et enregistré dans pref.json",
+                                    "AutoHekate on, saved to pref.json")
+                              : loc("AutoHekate désactivé et enregistré",
+                                    "AutoHekate off, saved"));
             }
             break;
     }
