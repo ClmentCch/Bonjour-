@@ -1188,19 +1188,22 @@ void App::renderCopy(Canvas& canvas) {
 }
 
 void App::renderModes(Canvas& canvas) {
-    const char* labels[4] = {loc("Copier hekate vers la mémoire interne",
+    const char* labels[5] = {loc("Copier hekate vers la mémoire interne",
                                  "Copy hekate to internal memory"),
                              "AutoRCM", "AutoHekate",
-                             loc("Entrée de démarrage", "Boot entry")};
-    const char* descriptions[4] = {
+                             loc("Entrée de démarrage", "Boot entry"),
+                             loc("Préparer le payload dongle", "Prepare dongle payload")};
+    const char* descriptions[5] = {
         loc("Copie le dossier « hekate » de la carte SD dans la mémoire interne",
             "Copies the \"hekate\" folder from the SD card into internal memory"),
         loc("État du pont RCM automatique", "Automatic RCM bridge state"),
         loc("Écrit autoboot dans hekate_ipl.ini (hekate requis, AutoRCM désactivé)",
             "Writes autoboot in hekate_ipl.ini (hekate required, AutoRCM off)"),
-        loc("Entrée lancée automatiquement par hekate", "Entry hekate boots automatically")};
+        loc("Entrée lancée automatiquement par hekate", "Entry hekate boots automatically"),
+        loc("Copie hekate.bin vers payload.bin à la racine de la SD",
+            "Copies hekate.bin to payload.bin at the SD root")};
 
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         const Rect row{kContentX, kContentTop + static_cast<float>(i) * 84.0f, kContentW, 72.0f};
         const bool focused = i == modes_.card;
         canvas.fillRoundRect(row, 16.0f, focused ? theme::kPanelActive : hex(0x0E0E12));
@@ -1251,6 +1254,12 @@ void App::renderModes(Canvas& canvas) {
                                           ? loc("Aucune entrée", "No entry")
                                           : modes_.bootEntries[static_cast<std::size_t>(modes_.bootEntry)];
             drawTextRight(canvas, row.right() - 24.0f, row.y + 40.0f, label, state);
+        } else if (i == 4) {
+            TextParams state;
+            state.weight = Weight::Medium;
+            state.size = 13.5f;
+            state.color = theme::kTextSecondary;
+            drawTextRight(canvas, row.right() - 24.0f, row.y + 40.0f, "payload.bin", state);
         }
     }
 }
@@ -1504,7 +1513,7 @@ void App::renderAbout(Canvas& canvas) {
     version.weight = Weight::Light;
     version.size = 13.0f;
     version.color = theme::kTextSecondary;
-    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 3.1.0  ·  homebrew pour Nintendo Switch",
+    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 4.0.0  ·  homebrew pour Nintendo Switch",
              version);
 
     TextParams body;

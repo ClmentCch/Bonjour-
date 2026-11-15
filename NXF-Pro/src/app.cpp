@@ -1594,7 +1594,7 @@ void App::updateModes(const InputState& input) {
     if (input.up && modes_.card > 0) {
         --modes_.card;
     }
-    if (input.down && modes_.card < 3) {
+    if (input.down && modes_.card < 4) {
         ++modes_.card;
     }
 
@@ -1663,6 +1663,31 @@ void App::updateModes(const InputState& input) {
                 writeHekateAutoboot(kHekateIniPath, modes_.bootEntry + 1, error);
             }
             showToast(modes_.bootEntries[modes_.bootEntry]);
+            break;
+        }
+        default: {
+            const std::string internalPayload = appendPath(appendPath(internal_.root(), "hekate"),
+                                                           "hekate.bin");
+            const std::string sdPayload = appendPath(appendPath(sd_.root(), "hekate"), "hekate.bin");
+            std::string source;
+            if (internal_.stats(internalPayload).exists) {
+                source = internalPayload;
+            } else if (sd_.stats(sdPayload).exists) {
+                source = sdPayload;
+            }
+            if (source.empty()) {
+                showToast(loc("hekate.bin introuvable (hekate/hekate.bin)",
+                              "hekate.bin not found (hekate/hekate.bin)"));
+                break;
+            }
+            const std::string target = appendPath(sd_.root(), "payload.bin");
+            std::string error;
+            if (sd_.copyPath(source, target, error) || sd_.stats(target).exists) {
+                showToast(loc("payload.bin prêt pour le dongle",
+                              "payload.bin ready for the dongle"));
+            } else {
+                showToast(error.empty() ? loc("Copie impossible", "Copy failed") : error);
+            }
             break;
         }
     }
