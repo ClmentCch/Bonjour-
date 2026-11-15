@@ -109,10 +109,16 @@ Icon sectionIcon(Section section) {
         case Section::Ftp: return Icon::Network;
         case Section::Apps: return Icon::Apps;
         case Section::Dbi: return Icon::Install;
+        case Section::Copy: return Icon::Copy;
+        case Section::Modes: return Icon::Power;
         case Section::Settings: return Icon::Settings;
         case Section::About: return Icon::Info;
     }
     return Icon::Info;
+}
+
+const char* loc(const char* fr, const char* en) {
+    return lang() == Lang::French ? fr : en;
 }
 
 const char* sectionLabel(Section section) {
@@ -121,6 +127,8 @@ const char* sectionLabel(Section section) {
         case Section::Internal: return tr(Txt::SubInternal);
         case Section::Apps: return tr(Txt::SubApps);
         case Section::Dbi: return tr(Txt::SubDbi);
+        case Section::Copy: return loc("Copier-coller", "Copy & paste");
+        case Section::Modes: return loc("Modes", "Modes");
         case Section::Ftp: return tr(Txt::SubFtp);
         case Section::Settings: return tr(Txt::SubSettings);
         case Section::About: return tr(Txt::SubAbout);
@@ -129,20 +137,36 @@ const char* sectionLabel(Section section) {
 }
 
 struct NavEntry {
-    Txt label;
-    Icon icon;
     Section section;
+    Icon icon;
 };
 
 const NavEntry kNav[] = {
-    {Txt::NavSd, Icon::SdCard, Section::Sd},
-    {Txt::NavInternal, Icon::Memory, Section::Internal},
-    {Txt::NavApps, Icon::Apps, Section::Apps},
-    {Txt::NavDbi, Icon::Install, Section::Dbi},
-    {Txt::NavFtp, Icon::Network, Section::Ftp},
-    {Txt::NavSettings, Icon::Settings, Section::Settings},
-    {Txt::NavAbout, Icon::Info, Section::About},
+    {Section::Sd, Icon::SdCard},
+    {Section::Internal, Icon::Memory},
+    {Section::Apps, Icon::Apps},
+    {Section::Dbi, Icon::Install},
+    {Section::Copy, Icon::Copy},
+    {Section::Modes, Icon::Power},
+    {Section::Ftp, Icon::Network},
+    {Section::Settings, Icon::Settings},
+    {Section::About, Icon::Info},
 };
+
+std::string navLabel(Section section) {
+    switch (section) {
+        case Section::Sd: return tr(Txt::NavSd);
+        case Section::Internal: return tr(Txt::NavInternal);
+        case Section::Apps: return tr(Txt::NavApps);
+        case Section::Dbi: return tr(Txt::NavDbi);
+        case Section::Copy: return loc("Copier-coller", "Copy & paste");
+        case Section::Modes: return loc("Modes", "Modes");
+        case Section::Ftp: return tr(Txt::NavFtp);
+        case Section::Settings: return tr(Txt::NavSettings);
+        case Section::About: return tr(Txt::NavAbout);
+    }
+    return "";
+}
 
 void drawPill(Canvas& canvas, const Rect& rect, const std::string& label, Color dot,
               Color textColor) {
@@ -243,6 +267,12 @@ void App::render(Canvas& canvas) {
         case Section::Dbi:
             renderDbi(canvas);
             break;
+        case Section::Copy:
+            renderCopy(canvas);
+            break;
+        case Section::Modes:
+            renderModes(canvas);
+            break;
         case Section::Ftp:
             renderFtp(canvas);
             break;
@@ -318,10 +348,10 @@ void App::renderSidebar(Canvas& canvas) {
     group.size = 10.0f;
     group.color = theme::kTextMuted;
     group.spacing = 1.6f;
-    drawText(canvas, 32.0f, 142.0f, "STOCKAGE", group);
-    drawText(canvas, 32.0f, 280.0f, "CONSOLE", group);
-    drawText(canvas, 32.0f, 412.0f, "RÉSEAU", group);
-    drawText(canvas, 32.0f, 498.0f, "APPLICATION", group);
+    drawText(canvas, 32.0f, 132.0f, "STOCKAGE", group);
+    drawText(canvas, 32.0f, 248.0f, "CONSOLE", group);
+    drawText(canvas, 32.0f, 460.0f, "RÉSEAU", group);
+    drawText(canvas, 32.0f, 526.0f, "APPLICATION", group);
 
     // Sliding active indicator
     const float targetY = nav::itemY(nav::indexForSection(section_)) + 12.0f;
@@ -354,7 +384,8 @@ void App::renderSidebar(Canvas& canvas) {
         params.weight = active ? Weight::Medium : Weight::Regular;
         params.size = 14.0f;
         params.color = active ? theme::kText : theme::kTextSecondary;
-        drawTextVCentered(canvas, item.x + 46.0f, y + kSidebarItemH * 0.5f, tr(entry.label), params);
+        drawTextVCentered(canvas, item.x + 46.0f, y + kSidebarItemH * 0.5f,
+                          navLabel(entry.section), params);
 
         if (active) {
             canvas.fillCircle(item.right() - 18.0f, y + kSidebarItemH * 0.5f, 2.5f,
@@ -966,10 +997,13 @@ void App::renderDbi(Canvas& canvas) {
 
             char details[160];
             if (nsp.titleId != 0) {
-                std::snprintf(details, sizeof(details), "%s · %016llX", formatSize(nsp.size).c_str(),
-                              static_cast<unsigned long long>(nsp.titleId));
+                std::snprintf(details, sizeof(details), "%s · %016llX · %d NCA%s",
+                              formatSize(nsp.size).c_str(),
+                              static_cast<unsigned long long>(nsp.titleId), nsp.ncaCount,
+                              nsp.hasTicket ? " · ticket" : "");
             } else {
-                std::snprintf(details, sizeof(details), "%s", formatSize(nsp.size).c_str());
+                std::snprintf(details, sizeof(details), "%s · %d NCA%s", formatSize(nsp.size).c_str(),
+                              nsp.ncaCount, nsp.hasTicket ? " · ticket" : "");
             }
             TextParams meta;
             meta.weight = Weight::Light;
@@ -1068,6 +1102,165 @@ void App::renderDbi(Canvas& canvas) {
             lineY += 18.0f;
         }
     }
+}
+
+void App::renderCopy(Canvas& canvas) {
+    const float cardW = (kContentW - 16.0f) * 0.5f;
+    const float cardH = 170.0f;
+    const char* titles[2] = {loc("SD  →  Switch", "SD  →  Switch"),
+                             loc("Switch  →  SD", "Switch  →  SD")};
+    const char* details[2] = {
+        loc("Crée le dossier « Copie » dans la mémoire interne et y copie la carte SD",
+            "Creates the \"Copy\" folder in internal memory and copies the SD card into it"),
+        loc("Crée le dossier « Copie Switch » sur la carte SD et y copie la mémoire interne",
+            "Creates the \"Switch Copy\" folder on the SD card and copies internal memory into it")};
+
+    for (int i = 0; i < 2; ++i) {
+        const Rect card{kContentX + static_cast<float>(i) * (cardW + 16.0f), kContentTop, cardW,
+                        cardH};
+        const bool focused = i == copy_.card;
+        canvas.fillRoundRect(card, 18.0f, focused ? theme::kPanelActive : hex(0x0E0E12));
+        canvas.strokeRoundRect(card, 18.0f,
+                               withAlpha(focused ? theme::kBorderStrong : theme::kBorder, 1.0f), 1.0f);
+        if (focused) {
+            canvas.fillRoundRect(Rect{card.x + 1.0f, card.y + 22.0f, 3.0f, card.h - 44.0f}, 1.5f,
+                                 rainbow(time_ * 0.25f));
+        }
+
+        drawIcon(canvas, i == 0 ? Icon::Memory : Icon::SdCard,
+                 Rect{card.x + 28.0f, card.y + 26.0f, 24.0f, 24.0f}, theme::kText);
+
+        TextParams title;
+        title.weight = Weight::Medium;
+        title.size = 17.0f;
+        drawText(canvas, card.x + 28.0f, card.y + 78.0f, titles[i], title);
+
+        TextParams detail;
+        detail.weight = Weight::Light;
+        detail.size = 12.5f;
+        detail.color = theme::kTextMuted;
+        float y = card.y + 108.0f;
+        for (const std::string& line : wrapText(details[i], detail, cardW - 56.0f)) {
+            drawText(canvas, card.x + 28.0f, y, line, detail);
+            y += 18.0f;
+        }
+    }
+
+    const Rect panel{kContentX, kContentTop + cardH + 20.0f, kContentW,
+                     kContentBottom - (kContentTop + cardH + 20.0f)};
+    drawCard(canvas, panel, 18.0f, theme::kPanel);
+
+    TextParams heading;
+    heading.weight = Weight::Medium;
+    heading.size = 11.0f;
+    heading.color = theme::kTextMuted;
+    heading.spacing = 1.6f;
+    drawText(canvas, panel.x + 24.0f, panel.y + 24.0f, "COPIE", heading);
+
+    TextParams body;
+    body.weight = Weight::Light;
+    body.size = 13.5f;
+    body.color = theme::kTextSecondary;
+
+    if (copy_.job.active) {
+        const std::size_t total = copy_.job.sources.size();
+        const float ratio = total == 0 ? 0.0f
+                                       : static_cast<float>(copy_.job.index) / static_cast<float>(total);
+        const Rect bar{panel.x + 24.0f, panel.y + 74.0f, panel.w - 48.0f, 8.0f};
+        canvas.fillRoundRect(bar, 4.0f, hex(0x1C1C24));
+        canvas.fillRoundRect(Rect{bar.x, bar.y, std::max(2.0f, bar.w * ratio), bar.h}, 4.0f,
+                             theme::kAccent);
+        char line[160];
+        std::snprintf(line, sizeof(line), "%zu / %zu fichiers  ·  %s", copy_.job.index, total,
+                      formatSize(copy_.job.done).c_str());
+        drawText(canvas, panel.x + 24.0f, panel.y + 110.0f, line, body);
+    } else if (!copy_.job.destination.empty()) {
+        drawText(canvas, panel.x + 24.0f, panel.y + 74.0f, copy_.job.destination, body);
+        if (!copy_.job.error.empty()) {
+            body.color = theme::kDanger;
+            drawText(canvas, panel.x + 24.0f, panel.y + 104.0f, copy_.job.error, body);
+        }
+    } else {
+        drawText(canvas, panel.x + 24.0f, panel.y + 74.0f,
+                 loc("Choisissez un sens de copie.", "Pick a copy direction."), body);
+    }
+}
+
+void App::renderModes(Canvas& canvas) {
+    const char* labels[3] = {loc("Copier hekate vers la mémoire interne",
+                                 "Copy hekate to internal memory"),
+                             "AutoRCM", "AutoHekate"};
+    const char* descriptions[3] = {
+        loc("Copie le dossier « hekate » de la carte SD dans la mémoire interne",
+            "Copies the \"hekate\" folder from the SD card into internal memory"),
+        loc("État du pont RCM automatique", "Automatic RCM bridge state"),
+        loc("Démarre hekate à l'allumage (hekate requis, AutoRCM désactivé)",
+            "Boots hekate on power-on (hekate required, AutoRCM off)")};
+
+    for (int i = 0; i < 3; ++i) {
+        const Rect row{kContentX, kContentTop + static_cast<float>(i) * 84.0f, kContentW, 72.0f};
+        const bool focused = i == modes_.card;
+        canvas.fillRoundRect(row, 16.0f, focused ? theme::kPanelActive : hex(0x0E0E12));
+        canvas.strokeRoundRect(row, 16.0f,
+                               withAlpha(focused ? theme::kBorderStrong : theme::kBorder, 1.0f), 1.0f);
+        if (focused) {
+            canvas.fillRoundRect(Rect{row.x + 1.0f, row.y + 16.0f, 3.0f, row.h - 32.0f}, 1.5f,
+                                 rainbow(time_ * 0.25f));
+        }
+
+        drawIcon(canvas, i == 0 ? Icon::FolderOpen : Icon::Power,
+                 Rect{row.x + 24.0f, row.y + 24.0f, 22.0f, 22.0f}, theme::kText);
+
+        TextParams label;
+        label.weight = Weight::Medium;
+        label.size = 15.0f;
+        drawText(canvas, row.x + 62.0f, row.y + 34.0f, labels[i], label);
+
+        TextParams desc;
+        desc.weight = Weight::Light;
+        desc.size = 12.0f;
+        desc.color = theme::kTextMuted;
+        drawText(canvas, row.x + 62.0f, row.y + 54.0f, descriptions[i], desc);
+
+        if (i == 1) {
+            TextParams state;
+            state.weight = Weight::Medium;
+            state.size = 14.0f;
+            state.color = modes_.autorcmOn ? hex(0x4ADE80) : hex(0xF87171);
+            drawTextRight(canvas, row.right() - 24.0f, row.y + 40.0f,
+                          modes_.autorcmOn ? "AutoRCM - On" : "AutoRCM - Off", state);
+        } else if (i == 2) {
+            TextParams state;
+            state.weight = Weight::Medium;
+            state.size = 14.0f;
+            state.color = modes_.autoHekate ? hex(0x4ADE80) : hex(0xF87171);
+            drawTextRight(canvas, row.right() - 24.0f, row.y + 40.0f,
+                          modes_.autoHekate ? "AutoHekate - On" : "AutoHekate - Off", state);
+        }
+    }
+}
+
+void App::renderQuestion(Canvas& canvas, float scale, float opacity) {
+    const Rect panel{kContentX + (kContentW - 580.0f) * 0.5f,
+                     kContentTop + 80.0f - (1.0f - scale) * 22.0f, 580.0f, 280.0f};
+    canvas.dropShadow(panel, 18.0f, 26.0f, 0.7f * opacity);
+    canvas.fillRoundRect(panel, 18.0f, withAlpha(hex(0x131319), opacity));
+    canvas.strokeRoundRect(panel, 18.0f, withAlpha(theme::kBorderStrong, opacity), 1.0f);
+
+    TextParams title;
+    title.weight = Weight::Medium;
+    title.size = 17.0f;
+    title.opacity = opacity;
+    float y = panel.y + 42.0f;
+    for (const std::string& line : wrapText(dialogTitle_, title, panel.w - 72.0f)) {
+        drawText(canvas, panel.x + 36.0f, y, line, title);
+        y += 26.0f;
+    }
+
+    const Rect no{panel.x + panel.w - 300.0f, panel.bottom() - 70.0f, 128.0f, 46.0f};
+    const Rect yes{panel.x + panel.w - 156.0f, panel.bottom() - 70.0f, 128.0f, 46.0f};
+    drawButton(canvas, no, tr(Txt::No), false, dialogFocus_ == 0, opacity);
+    drawButton(canvas, yes, tr(Txt::Yes), true, dialogFocus_ == 1, opacity, true);
 }
 
 void App::renderSetup(Canvas& canvas) {
@@ -1378,6 +1571,13 @@ void App::renderFooter(Canvas& canvas) {
                         ? "A Installer    B Retour    ZL/ZR Sections    + Quitter"
                         : "A Ouvrir    ZL/ZR Sections    + Quitter";
             break;
+        case Section::Copy:
+            hints = copy_.job.active ? "Copie en cours…    ZL/ZR Sections    + Quitter"
+                                     : "A Lancer    ←→ Choix    ZL/ZR Sections    + Quitter";
+            break;
+        case Section::Modes:
+            hints = "A Activer    ↑↓ Choix    ZL/ZR Sections    + Quitter";
+            break;
         case Section::Ftp:
             hints = "A Démarrer / Arrêter    ZL/ZR Sections    + Quitter";
             break;
@@ -1463,6 +1663,11 @@ void App::renderDialog(Canvas& canvas) {
 
     if (dialog_ == DialogKind::NspConflict) {
         renderNspDialog(canvas, scale, opacity);
+        return;
+    }
+
+    if (dialog_ == DialogKind::Question) {
+        renderQuestion(canvas, scale, opacity);
         return;
     }
 

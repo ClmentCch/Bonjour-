@@ -3,6 +3,7 @@
  * MIT licensed, see LICENSE.
  */
 #include "nxf/app.hpp"
+#include "nxf/nsp.hpp"
 
 #include "nxf/image.hpp"
 
@@ -740,6 +741,12 @@ void App::update(const InputState& input) {
         case Section::Dbi:
             updateDbi(input);
             break;
+        case Section::Copy:
+            updateCopy(input);
+            break;
+        case Section::Modes:
+            updateModes(input);
+            break;
         case Section::Ftp:
             updateFtpScreen(input);
             break;
@@ -750,6 +757,7 @@ void App::update(const InputState& input) {
             break;
     }
 
+    stepCopyJob();
     updateTouch(input);
 }
 
@@ -958,6 +966,28 @@ void App::updateDialog(const InputState& input) {
         if (input.back) {
             closeDialog();
             showToast(tr(Txt::CancelNoRemove));
+        }
+        return;
+    }
+
+    if (dialog_ == DialogKind::Question) {
+        if (input.left || input.right || input.up || input.down) {
+            dialogFocus_ = dialogFocus_ == 0 ? 1 : 0;
+        }
+        const char* cancelled = lang() == Lang::French ? "Copie annulée" : "Copy cancelled";
+        if (input.back) {
+            closeDialog();
+            showToast(cancelled);
+            return;
+        }
+        if (input.accept) {
+            const bool yes = dialogFocus_ == 1;
+            closeDialog();
+            if (yes) {
+                copyHekateFolder();
+            } else {
+                showToast(cancelled);
+            }
         }
         return;
     }
@@ -1250,6 +1280,9 @@ void App::scanNspFiles() {
             nsp.name = name;
             nsp.size = static_cast<std::uint64_t>(info.st_size);
             nsp.titleId = titleIdFromName(name);
+            const NspInfo nspInfo = parseNsp(full);
+            nsp.ncaCount = nspInfo.ncaCount;
+            nsp.hasTicket = nspInfo.hasTicket;
             for (const TitleEntry& title : installed) {
                 if (title.id == nsp.titleId) {
                     nsp.installed = true;
@@ -1382,6 +1415,209 @@ void App::confirmNspInstall() {
     // Installing an NSP requires the NCM content pipeline (CNMT + tickets),
     // which this build does not ship. Never erase content we cannot replace.
     showToast(tr(Txt::InstallUnavailable));
+}
+
+} // namespace nxf
+
+namespace nxf {
+
+// ---------------------------------------------------------------------------
+// Copier-coller
+// ---------------------------------------------------------------------------
+namespace {
+
+const char* loc(const char* fr, const char* en) {
+    return nxf::lang() == nxf::Lang::French ? fr : en;
+}
+
+void ensureTree(nxf::StorageApi& api, const std::string& directory) {
+    const std::string root = api.root();
+    if (directory.size() <= root.size()) {
+        return;
+    }
+    std::string current = root;
+    std::string error;
+    std::size_t index = root.size();
+    while (index < directory.size()) {
+        while (index < directory.size() && directory[index] == '/') {
+            ++index;
+        }
+        if (index >= directory.size()) {
+            break;
+        }
+        const std::size_t next = directory.find('/', index);
+        if (current.back() != '/') {
+            current += '/';
+        }
+        current += directory.substr(index, next == std::string::npos ? std::string::npos : next - index);
+        api.makeDirectory(current, error);
+        if (next == std::string::npos) {
+            break;
+        }
+        index = next + 1;
+    }
+}
+
+std::string appendPath(const std::string& base, const std::string& name) {
+    if (name.empty()) {
+        return base;
+    }
+    return base + (base.back() == '/' || name.front() == '/' ? "" : "/") + name;
+}
+
+} // namespace
+
+void App::startCopyJob(bool toInternal) {
+    nxf::StorageApi& source = toInternal ? sd_ : internal_;
+    nxf::StorageApi& target = toInternal ? internal_ : sd_;
+
+    copy_.job = CopyJob{};
+    copy_.job.toInternal = toInternal;
+    copy_.job.destination =
+        appendPath(target.root(), toInternal ? loc("Copie", "Copy")
+                                           : loc("Copie Switch", "Switch Copy"));
+
+    std::string error;
+    ensureTree(target, copy_.job.destination);
+
+    const std::string sourceRoot = source.root();
+    std::vector<std::string> pending{sourceRoot};
+    while (!pending.empty()) {
+        const std::string directory = pending.back();
+        pending.pop_back();
+        std::vector<nxf::FileEntry> entries;
+        if (!source.list(directory, entries, error)) {
+            continue;
+        }
+        for (const nxf::FileEntry& entry : entries) {
+            const std::string child = appendPath(directory, entry.name);
+            if (child == copy_.job.destination) {
+                continue;
+            }
+            if (entry.isDirectory) {
+                pending.push_back(child);
+                continue;
+            }
+            copy_.job.sources.push_back(child);
+            copy_.job.targets.push_back(appendPath(copy_.job.destination,
+                                                 child.size() > sourceRoot.size()
+                                                     ? child.substr(sourceRoot.size())
+                                                     : entry.name));
+            copy_.job.total += entry.size;
+        }
+    }
+
+    if (copy_.job.sources.empty()) {
+        showToast(loc("Rien à copier", "Nothing to copy"));
+        return;
+    }
+
+    copy_.job.active = true;
+    showToast(loc("Copie démarrée", "Copy started"));
+}
+
+void App::stepCopyJob() {
+    if (!copy_.job.active) {
+        return;
+    }
+
+    nxf::StorageApi& source = copy_.job.toInternal ? sd_ : internal_;
+    nxf::StorageApi& target = copy_.job.toInternal ? internal_ : sd_;
+
+    std::string error;
+    for (int i = 0; i < 8 && copy_.job.index < copy_.job.sources.size(); ++i) {
+        const std::string& from = copy_.job.sources[copy_.job.index];
+        const std::string& to = copy_.job.targets[copy_.job.index];
+        ensureTree(target, to.substr(0, to.find_last_of('/')));
+        if (source.copyPath(from, to, error) || target.stats(to).exists) {
+            copy_.job.done += source.stats(from).size;
+        } else if (copy_.job.error.empty()) {
+            copy_.job.error = error.empty() ? loc("Copie impossible", "Copy failed") : error;
+        }
+        ++copy_.job.index;
+    }
+
+    if (copy_.job.index >= copy_.job.sources.size()) {
+        copy_.job.active = false;
+        showToast(copy_.job.error.empty() ? loc("Copie terminée", "Copy finished")
+                                          : loc("Copie incomplète", "Copy incomplete"));
+    }
+}
+
+void App::updateCopy(const InputState& input) {
+    if (copy_.job.active) {
+        if (input.back) {
+            copy_.job.active = false;
+            showToast(loc("Copie incomplète", "Copy incomplete"));
+        }
+        return;
+    }
+    if (input.left) {
+        copy_.card = 0;
+    }
+    if (input.right) {
+        copy_.card = 1;
+    }
+    if (input.accept) {
+        startCopyJob(copy_.card == 0);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Modes
+// ---------------------------------------------------------------------------
+void App::copyHekateFolder() {
+    std::string error;
+    const std::string source = appendPath(sd_.root(), "hekate");
+    const std::string target = appendPath(internal_.root(), "hekate");
+
+    if (!sd_.stats(source).exists) {
+        showToast(loc("Dossier hekate introuvable sur la carte SD", "hekate folder not found on the SD card"));
+        return;
+    }
+
+    ensureTree(internal_, target);
+    const bool ok = internal_.copyPath(source, target, error) || internal_.stats(target).exists;
+    showToast(ok ? loc("Dossier hekate copié dans la mémoire interne", "hekate folder copied to internal memory")
+                 : (error.empty() ? loc("Copie impossible", "Copy failed") : error));
+    modes_.hekatePresent = internal_.stats(target).exists;
+}
+
+void App::updateModes(const InputState& input) {
+    if (input.up && modes_.card > 0) {
+        --modes_.card;
+    }
+    if (input.down && modes_.card < 2) {
+        ++modes_.card;
+    }
+
+    modes_.hekatePresent = internal_.stats(appendPath(internal_.root(), "hekate")).exists;
+
+    if (!input.accept) {
+        return;
+    }
+
+    switch (modes_.card) {
+        case 0:
+            dialog_ = DialogKind::Question;
+            dialogTitle_ = loc("Est-ce que le fichier bin hekate est dans le dossier « hekate » de la carte SD ?", "Is the hekate bin file in the \"hekate\" folder of the SD card?");
+            dialogFocus_ = 1;
+            break;
+        case 1:
+            showToast(loc("AutoRCM : la modification de boot0 n'est pas prise en charge", "AutoRCM: modifying boot0 is not supported"));
+            break;
+        default:
+            if (!modes_.hekatePresent) {
+                showToast(loc("Copiez d'abord le dossier hekate dans la mémoire interne", "Copy the hekate folder to internal memory first"));
+            } else if (modes_.autorcmOn) {
+                showToast(loc("Désactivez AutoRCM d'abord", "Turn AutoRCM off first"));
+            } else {
+                modes_.autoHekate = !modes_.autoHekate;
+                showToast(modes_.autoHekate ? loc("AutoHekate activé : le démarrage de hekate demande un chargeur d'amorçage modifié", "AutoHekate on: booting hekate requires a modified bootloader")
+                                            : loc("AutoHekate désactivé", "AutoHekate off"));
+            }
+            break;
+    }
 }
 
 } // namespace nxf

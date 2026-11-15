@@ -427,6 +427,17 @@ int main(int argc, char** argv) {
     press([](nxf::InputState& in) { in.accept = true; });
     step(20);
     shot("17_properties");
+    press([](nxf::InputState& in) { in.back = true; });
+    step(20);
+
+    for (int i = 0; i < 4; ++i) {
+        press([](nxf::InputState& in) { in.nextSection = true; });
+    }
+    step(40);
+    shot("18_copy");
+    press([](nxf::InputState& in) { in.nextSection = true; });
+    step(40);
+    shot("19_modes");
 
     std::printf("\nall screens rendered\n");
     return 0;

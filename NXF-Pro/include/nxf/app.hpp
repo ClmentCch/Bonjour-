@@ -24,12 +24,14 @@ enum class Section {
     Internal = 1,
     Apps = 2,
     Dbi = 3,
-    Ftp = 4,
-    Settings = 5,
-    About = 6,
+    Copy = 4,
+    Modes = 5,
+    Ftp = 6,
+    Settings = 7,
+    About = 8,
 };
 enum class ViewMode { List, Grid };
-enum class DialogKind { None, Confirm, Properties, Actions, NspConflict };
+enum class DialogKind { None, Confirm, Properties, Actions, NspConflict, Question };
 
 struct SettingsState {
     Lang language = Lang::French;
@@ -140,6 +142,8 @@ struct NspEntry {
     std::uint64_t size = 0;
     std::uint64_t titleId = 0;
     bool installed = false;
+    int ncaCount = 0;
+    bool hasTicket = false;
 };
 
 enum class DbiView { Cards = 0, NspList = 1 };
@@ -153,6 +157,32 @@ struct DbiState {
     float scrollTarget = 0.0f;
     bool scanned = false;
     std::string error;
+};
+
+/// Whole-storage copy driven from the Copier-Coller section.
+struct CopyJob {
+    bool active = false;
+    bool toInternal = false;
+    std::string destination;
+    std::vector<std::string> sources;
+    std::vector<std::string> targets;
+    std::size_t index = 0;
+    std::uint64_t total = 0;
+    std::uint64_t done = 0;
+    std::string error;
+};
+
+struct CopyState {
+    int card = 0;
+    CopyJob job;
+};
+
+struct ModesState {
+    int card = 0;
+    bool hekatePresent = false;
+    bool autorcmOn = false;
+    bool autorcmKnown = false;
+    bool autoHekate = false;
 };
 
 /// First-run language selection.
@@ -230,18 +260,20 @@ constexpr float kVisibleListHeight = kContentBottom - kContentTop;
 /// Sidebar geometry shared by input handling and rendering.
 namespace nav {
 
-constexpr int kCount = 7;
+constexpr int kCount = 9;
 
 inline float itemY(int index) {
     switch (index) {
-        case 0: return 166.0f;
-        case 1: return 218.0f;
-        case 2: return 304.0f;
-        case 3: return 356.0f;
-        case 4: return 436.0f;
-        case 5: return 522.0f;
-        case 6: return 574.0f;
-        default: return 166.0f;
+        case 0: return 154.0f;
+        case 1: return 202.0f;
+        case 2: return 270.0f;
+        case 3: return 318.0f;
+        case 4: return 366.0f;
+        case 5: return 414.0f;
+        case 6: return 482.0f;
+        case 7: return 548.0f;
+        case 8: return 596.0f;
+        default: return 154.0f;
     }
 }
 
@@ -251,9 +283,11 @@ inline int indexForSection(Section section) {
         case Section::Internal: return 1;
         case Section::Apps: return 2;
         case Section::Dbi: return 3;
-        case Section::Ftp: return 4;
-        case Section::Settings: return 5;
-        case Section::About: return 6;
+        case Section::Copy: return 4;
+        case Section::Modes: return 5;
+        case Section::Ftp: return 6;
+        case Section::Settings: return 7;
+        case Section::About: return 8;
     }
     return 0;
 }
@@ -264,9 +298,11 @@ inline Section sectionFor(int index) {
         case 1: return Section::Internal;
         case 2: return Section::Apps;
         case 3: return Section::Dbi;
-        case 4: return Section::Ftp;
-        case 5: return Section::Settings;
-        case 6: return Section::About;
+        case 4: return Section::Copy;
+        case 5: return Section::Modes;
+        case 6: return Section::Ftp;
+        case 7: return Section::Settings;
+        case 8: return Section::About;
         default: return Section::Sd;
     }
 }
@@ -362,6 +398,11 @@ private:
     void updateSettingsScreen(const InputState& input);
     void updateApps(const InputState& input);
     void updateDbi(const InputState& input);
+    void updateCopy(const InputState& input);
+    void updateModes(const InputState& input);
+    void startCopyJob(bool toInternal);
+    void stepCopyJob();
+    void copyHekateFolder();
     void updateSetup(const InputState& input);
     void scanNspFiles();
     void requestNspInstall();
@@ -381,6 +422,9 @@ private:
     void renderFtp(Canvas& canvas);
     void renderApps(Canvas& canvas);
     void renderDbi(Canvas& canvas);
+    void renderCopy(Canvas& canvas);
+    void renderModes(Canvas& canvas);
+    void renderQuestion(Canvas& canvas, float scale, float opacity);
     void renderSetup(Canvas& canvas);
     void renderNspDialog(Canvas& canvas, float scale, float opacity);
     void renderSettings(Canvas& canvas);
@@ -433,6 +477,8 @@ private:
 
     AppsState apps_;
     DbiState dbi_;
+    CopyState copy_;
+    ModesState modes_;
     SetupState setup_;
     int pendingNsp_ = -1;
     std::uint64_t conflictTitleId_ = 0;
