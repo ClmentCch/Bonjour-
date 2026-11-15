@@ -126,6 +126,20 @@ public:
         nxf::savePrefs(kPrefsPath, settings);
     }
 
+    int autoRcmState() override {
+        FsStorage storage;
+        if (R_FAILED(fsOpenBisStorage(&storage, FsBisPartitionId_BootPartition1Root))) {
+            return -1;
+        }
+        std::uint8_t sector[0x200] = {};
+        const bool read = R_SUCCEEDED(fsStorageRead(&storage, 0, sector, sizeof(sector)));
+        fsStorageClose(&storage);
+        if (!read) {
+            return -1;
+        }
+        return (sector[0] == 'B' && sector[1] == 'C' && sector[2] == 'T' && sector[3] == '0') ? 0 : 1;
+    }
+
     bool savePreferences(const nxf::SettingsState& settings) override {
         return nxf::savePrefs(kPrefsPath, settings);
     }

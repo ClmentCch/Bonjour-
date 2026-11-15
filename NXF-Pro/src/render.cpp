@@ -1226,16 +1226,19 @@ void App::renderModes(Canvas& canvas) {
             TextParams state;
             state.weight = Weight::Medium;
             state.size = 14.0f;
-            state.color = modes_.autorcmOn ? hex(0x4ADE80) : hex(0xF87171);
+            state.color = !modes_.autorcmKnown ? theme::kTextMuted
+                           : (modes_.autorcmOn ? hex(0x4ADE80) : hex(0xF87171));
             drawTextRight(canvas, row.right() - 24.0f, row.y + 40.0f,
-                          modes_.autorcmOn ? "AutoRCM - On" : "AutoRCM - Off", state);
+                          !modes_.autorcmKnown ? loc("AutoRCM - Inconnu", "AutoRCM - Unknown")
+                                               : (modes_.autorcmOn ? "AutoRCM - On" : "AutoRCM - Off"),
+                          state);
         } else if (i == 2) {
             TextParams state;
             state.weight = Weight::Medium;
             state.size = 14.0f;
-            state.color = modes_.autoHekate ? hex(0x4ADE80) : hex(0xF87171);
+            state.color = theme::kTextMuted;
             drawTextRight(canvas, row.right() - 24.0f, row.y + 40.0f,
-                          modes_.autoHekate ? "AutoHekate - On" : "AutoHekate - Off", state);
+                          loc("AutoHekate - Indisponible", "AutoHekate - Unavailable"), state);
         }
     }
 }

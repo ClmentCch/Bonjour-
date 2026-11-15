@@ -90,6 +90,8 @@ struct Platform {
     virtual void settingsChanged(const SettingsState& settings) = 0;
     /// Writes sdmc:/NXF_Save/pref.json (created on first save).
     virtual bool savePreferences(const SettingsState& settings) = 0;
+    /// Reads the AutoRCM flag from boot0: 0 off, 1 on, -1 unknown.
+    virtual int autoRcmState() { return -1; }
 };
 
 struct FtpSnapshot {

@@ -1592,6 +1592,9 @@ void App::updateModes(const InputState& input) {
     }
 
     modes_.hekatePresent = internal_.stats(appendPath(internal_.root(), "hekate")).exists;
+    const int rcm = platform_.autoRcmState();
+    modes_.autorcmKnown = rcm >= 0;
+    modes_.autorcmOn = rcm == 1;
 
     if (!input.accept) {
         return;
@@ -1612,9 +1615,8 @@ void App::updateModes(const InputState& input) {
             } else if (modes_.autorcmOn) {
                 showToast(loc("Désactivez AutoRCM d'abord", "Turn AutoRCM off first"));
             } else {
-                modes_.autoHekate = !modes_.autoHekate;
-                showToast(modes_.autoHekate ? loc("AutoHekate activé : le démarrage de hekate demande un chargeur d'amorçage modifié", "AutoHekate on: booting hekate requires a modified bootloader")
-                                            : loc("AutoHekate désactivé", "AutoHekate off"));
+                showToast(loc("AutoHekate demande un chargeur d'amorçage modifié : non pris en charge",
+                              "AutoHekate needs a modified bootloader: not supported"));
             }
             break;
     }
