@@ -941,7 +941,7 @@ private:
     StorageApi& internal_;
 
     Thread thread_ {};
-    alignas(16) std::uint8_t stack_[0x8000] = {};
+    alignas(0x1000) std::uint8_t stack_[0x10000] = {};
     bool threadStarted_ = false;
     std::atomic<bool> running_ {false};
     int listenFd_ = -1;
