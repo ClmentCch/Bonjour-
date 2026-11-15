@@ -1188,17 +1188,19 @@ void App::renderCopy(Canvas& canvas) {
 }
 
 void App::renderModes(Canvas& canvas) {
-    const char* labels[3] = {loc("Copier hekate vers la mémoire interne",
+    const char* labels[4] = {loc("Copier hekate vers la mémoire interne",
                                  "Copy hekate to internal memory"),
-                             "AutoRCM", "AutoHekate"};
-    const char* descriptions[3] = {
+                             "AutoRCM", "AutoHekate",
+                             loc("Entrée de démarrage", "Boot entry")};
+    const char* descriptions[4] = {
         loc("Copie le dossier « hekate » de la carte SD dans la mémoire interne",
             "Copies the \"hekate\" folder from the SD card into internal memory"),
         loc("État du pont RCM automatique", "Automatic RCM bridge state"),
-        loc("Démarre hekate à l'allumage (hekate requis, AutoRCM désactivé)",
-            "Boots hekate on power-on (hekate required, AutoRCM off)")};
+        loc("Écrit autoboot dans hekate_ipl.ini (hekate requis, AutoRCM désactivé)",
+            "Writes autoboot in hekate_ipl.ini (hekate required, AutoRCM off)"),
+        loc("Entrée lancée automatiquement par hekate", "Entry hekate boots automatically")};
 
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         const Rect row{kContentX, kContentTop + static_cast<float>(i) * 84.0f, kContentW, 72.0f};
         const bool focused = i == modes_.card;
         canvas.fillRoundRect(row, 16.0f, focused ? theme::kPanelActive : hex(0x0E0E12));
@@ -1237,9 +1239,18 @@ void App::renderModes(Canvas& canvas) {
             TextParams state;
             state.weight = Weight::Medium;
             state.size = 14.0f;
-            state.color = theme::kTextMuted;
+            state.color = modes_.autoHekate ? hex(0x4ADE80) : hex(0xF87171);
             drawTextRight(canvas, row.right() - 24.0f, row.y + 40.0f,
-                          loc("AutoHekate - Indisponible", "AutoHekate - Unavailable"), state);
+                          modes_.autoHekate ? "AutoHekate - On" : "AutoHekate - Off", state);
+        } else if (i == 3) {
+            TextParams state;
+            state.weight = Weight::Medium;
+            state.size = 13.5f;
+            state.color = theme::kTextSecondary;
+            const std::string label = modes_.bootEntries.empty()
+                                          ? loc("Aucune entrée", "No entry")
+                                          : modes_.bootEntries[static_cast<std::size_t>(modes_.bootEntry)];
+            drawTextRight(canvas, row.right() - 24.0f, row.y + 40.0f, label, state);
         }
     }
 }
@@ -1493,7 +1504,7 @@ void App::renderAbout(Canvas& canvas) {
     version.weight = Weight::Light;
     version.size = 13.0f;
     version.color = theme::kTextSecondary;
-    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 3.0.0  ·  homebrew pour Nintendo Switch",
+    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 3.1.0  ·  homebrew pour Nintendo Switch",
              version);
 
     TextParams body;

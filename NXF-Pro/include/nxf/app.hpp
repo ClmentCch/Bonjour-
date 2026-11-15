@@ -186,6 +186,8 @@ struct ModesState {
     bool autorcmOn = false;
     bool autorcmKnown = false;
     bool autoHekate = false;
+    std::vector<std::string> bootEntries;
+    int bootEntry = 0;
 };
 
 /// First-run language selection.

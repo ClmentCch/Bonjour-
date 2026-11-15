@@ -4,6 +4,7 @@
  */
 #include "nxf/app.hpp"
 #include "nxf/nsp.hpp"
+#include "nxf/hekate.hpp"
 
 #include "nxf/image.hpp"
 
@@ -1434,6 +1435,8 @@ const char* loc(const char* fr, const char* en) {
     return nxf::lang() == nxf::Lang::French ? fr : en;
 }
 
+const char* kHekateIniPath = "sdmc:/bootloader/hekate_ipl.ini";
+
 void ensureTree(nxf::StorageApi& api, const std::string& directory) {
     const std::string root = api.root();
     if (directory.size() <= root.size()) {
@@ -1591,8 +1594,17 @@ void App::updateModes(const InputState& input) {
     if (input.up && modes_.card > 0) {
         --modes_.card;
     }
-    if (input.down && modes_.card < 2) {
+    if (input.down && modes_.card < 3) {
         ++modes_.card;
+    }
+
+    if (input.up || input.down || input.accept) {
+        const HekateConfig config = readHekateConfig(kHekateIniPath);
+        modes_.bootEntries = config.entries;
+        if (!modes_.bootEntries.empty()) {
+            const int index = config.autoboot > 0 ? config.autoboot - 1 : modes_.bootEntry;
+            modes_.bootEntry = std::max(0, std::min(index, static_cast<int>(modes_.bootEntries.size()) - 1));
+        }
     }
 
     modes_.hekatePresent = internal_.stats(appendPath(internal_.root(), "hekate")).exists;
@@ -1613,22 +1625,46 @@ void App::updateModes(const InputState& input) {
         case 1:
             showToast(loc("AutoRCM : la modification de boot0 n'est pas prise en charge", "AutoRCM: modifying boot0 is not supported"));
             break;
-        default:
+        case 2:
             if (!modes_.hekatePresent) {
                 showToast(loc("Copiez d'abord le dossier hekate dans la mémoire interne", "Copy the hekate folder to internal memory first"));
             } else if (modes_.autorcmOn) {
                 showToast(loc("Désactivez AutoRCM d'abord", "Turn AutoRCM off first"));
             } else {
-                modes_.autoHekate = !modes_.autoHekate;
+                std::string error;
+                const int value = modes_.autoHekate
+                                      ? 0
+                                      : (modes_.bootEntries.empty() ? 1 : modes_.bootEntry + 1);
+                if (!writeHekateAutoboot(kHekateIniPath, value, error)) {
+                    showToast(error.empty() ? loc("hekate_ipl.ini non modifiable",
+                                                  "hekate_ipl.ini is not writable")
+                                            : error);
+                    break;
+                }
+                modes_.autoHekate = value != 0;
                 settings_.autoHekate = modes_.autoHekate;
                 settingsDirty_ = true;
                 showToast(modes_.autoHekate
-                              ? loc("AutoHekate activé et enregistré dans pref.json",
-                                    "AutoHekate on, saved to pref.json")
-                              : loc("AutoHekate désactivé et enregistré",
-                                    "AutoHekate off, saved"));
+                              ? loc("AutoHekate activé : hekate_ipl.ini autoboot écrit",
+                                    "AutoHekate on: hekate_ipl.ini autoboot written")
+                              : loc("AutoHekate désactivé : autoboot remis à 0",
+                                    "AutoHekate off: autoboot reset to 0"));
             }
             break;
+        case 3: {
+            if (modes_.bootEntries.empty()) {
+                showToast(loc("Aucune entrée dans hekate_ipl.ini",
+                              "No entry in hekate_ipl.ini"));
+                break;
+            }
+            modes_.bootEntry = (modes_.bootEntry + 1) % static_cast<int>(modes_.bootEntries.size());
+            if (modes_.autoHekate) {
+                std::string error;
+                writeHekateAutoboot(kHekateIniPath, modes_.bootEntry + 1, error);
+            }
+            showToast(modes_.bootEntries[modes_.bootEntry]);
+            break;
+        }
     }
 }
 
