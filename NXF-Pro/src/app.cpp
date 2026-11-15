@@ -1437,6 +1437,83 @@ const char* loc(const char* fr, const char* en) {
 
 const char* kHekateIniPath = "sdmc:/bootloader/hekate_ipl.ini";
 
+void ensureTree(nxf::StorageApi& api, const std::string& directory);
+std::string appendPath(const std::string& base, const std::string& name);
+
+/// Copies one file across mounts: StorageApi::copyPath() only accepts paths
+/// under its own root, so SD <-> internal transfers need plain file I/O
+/// (both mounts are fsdev devices, so fopen works on them).
+bool copyAcrossMounts(const std::string& from, const std::string& to, std::string& error) {
+    std::FILE* input = std::fopen(from.c_str(), "rb");
+    if (input == nullptr) {
+        error = "Lecture impossible";
+        return false;
+    }
+    std::FILE* output = std::fopen(to.c_str(), "wb");
+    if (output == nullptr) {
+        std::fclose(input);
+        error = "Écriture impossible";
+        return false;
+    }
+
+    std::vector<char> buffer(256u * 1024u);
+    bool ok = true;
+    while (true) {
+        const std::size_t read = std::fread(buffer.data(), 1, buffer.size(), input);
+        if (read == 0) {
+            break;
+        }
+        if (std::fwrite(buffer.data(), 1, read, output) != read) {
+            ok = false;
+            break;
+        }
+        if (read < buffer.size()) {
+            break;
+        }
+    }
+    std::fclose(input);
+    std::fclose(output);
+    if (!ok) {
+        std::remove(to.c_str());
+        error = "Copie incomplète";
+    }
+    return ok;
+}
+
+/// Recursively copies a directory across mounts.
+bool copyTreeAcross(const std::string& from, const std::string& to, nxf::StorageApi& target,
+                    std::string& error) {
+    struct stat info {};
+    if (stat(from.c_str(), &info) != 0) {
+        error = "Source introuvable";
+        return false;
+    }
+    if (!S_ISDIR(info.st_mode)) {
+        return copyAcrossMounts(from, to, error);
+    }
+
+    ensureTree(target, to);
+    DIR* dir = opendir(from.c_str());
+    if (dir == nullptr) {
+        error = "Lecture impossible";
+        return false;
+    }
+    bool ok = true;
+    while (struct dirent* entry = readdir(dir)) {
+        if (std::strcmp(entry->d_name, ".") == 0 || std::strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        if (!copyTreeAcross(appendPath(from, entry->d_name), appendPath(to, entry->d_name), target,
+                            error)) {
+            ok = false;
+            break;
+        }
+    }
+    closedir(dir);
+    return ok;
+}
+
+
 void ensureTree(nxf::StorageApi& api, const std::string& directory) {
     const std::string root = api.root();
     if (directory.size() <= root.size()) {
@@ -1536,7 +1613,7 @@ void App::stepCopyJob() {
         const std::string& from = copy_.job.sources[copy_.job.index];
         const std::string& to = copy_.job.targets[copy_.job.index];
         ensureTree(target, to.substr(0, to.find_last_of('/')));
-        if (source.copyPath(from, to, error) || target.stats(to).exists) {
+        if (copyAcrossMounts(from, to, error)) {
             copy_.job.done += source.stats(from).size;
         } else if (copy_.job.error.empty()) {
             copy_.job.error = error.empty() ? loc("Copie impossible", "Copy failed") : error;
@@ -1584,7 +1661,7 @@ void App::copyHekateFolder() {
     }
 
     ensureTree(internal_, target);
-    const bool ok = internal_.copyPath(source, target, error) || internal_.stats(target).exists;
+    const bool ok = copyTreeAcross(source, target, internal_, error);
     showToast(ok ? loc("Dossier hekate copié dans la mémoire interne", "hekate folder copied to internal memory")
                  : (error.empty() ? loc("Copie impossible", "Copy failed") : error));
     modes_.hekatePresent = internal_.stats(target).exists;
@@ -1682,7 +1759,7 @@ void App::updateModes(const InputState& input) {
             }
             const std::string target = appendPath(sd_.root(), "payload.bin");
             std::string error;
-            if (sd_.copyPath(source, target, error) || sd_.stats(target).exists) {
+            if (copyAcrossMounts(source, target, error)) {
                 showToast(loc("payload.bin prêt pour le dongle",
                               "payload.bin ready for the dongle"));
             } else {
