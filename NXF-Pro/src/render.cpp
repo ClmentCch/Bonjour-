@@ -1196,7 +1196,8 @@ void App::renderModes(Canvas& canvas) {
     const char* descriptions[5] = {
         loc("Copie le dossier « hekate » de la carte SD dans la mémoire interne",
             "Copies the \"hekate\" folder from the SD card into internal memory"),
-        loc("État du pont RCM automatique", "Automatic RCM bridge state"),
+        loc("Désactivation : hekate > Tools > AutoRCM (boot0 non réécrit ici)",
+            "Disable from hekate > Tools > AutoRCM (boot0 is not rewritten here)"),
         loc("Écrit autoboot dans hekate_ipl.ini (hekate requis, AutoRCM désactivé)",
             "Writes autoboot in hekate_ipl.ini (hekate required, AutoRCM off)"),
         loc("Entrée lancée automatiquement par hekate", "Entry hekate boots automatically"),
@@ -1262,6 +1263,18 @@ void App::renderModes(Canvas& canvas) {
             drawTextRight(canvas, row.right() - 24.0f, row.y + 40.0f, "payload.bin", state);
         }
     }
+
+    TextParams note;
+    note.weight = Weight::Light;
+    note.size = 12.0f;
+    note.color = theme::kTextMuted;
+    const float noteY = kContentTop + 5.0f * 84.0f - 6.0f;
+    char line[220];
+    std::snprintf(line, sizeof(line),
+                  "hekate %s   ·   AutoRCM %s   ·   autoboot %s", modes_.hekatePresent ? "OK" : "-",
+                  modes_.autorcmKnown ? (modes_.autorcmOn ? "ON" : "OFF") : "?",
+                  modes_.autoHekate ? "ON" : "OFF");
+    drawText(canvas, kContentX, noteY, line, note);
 }
 
 void App::renderQuestion(Canvas& canvas, float scale, float opacity) {
@@ -1513,7 +1526,7 @@ void App::renderAbout(Canvas& canvas) {
     version.weight = Weight::Light;
     version.size = 13.0f;
     version.color = theme::kTextSecondary;
-    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 5.0.0  ·  homebrew pour Nintendo Switch",
+    drawText(canvas, kContentX + 112.0f, top + 44.0f, "Version 6.0.0  ·  homebrew pour Nintendo Switch",
              version);
 
     TextParams body;
